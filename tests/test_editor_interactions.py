@@ -202,6 +202,33 @@ def test_timeline_layer_selection_and_layer_delete():
     assert editor.active_layer == 0
 
 
+def test_ctrl_d_duplicates_active_layer_with_unique_ids_and_undo():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.4, 0.4))
+    source_layer = editor.project.layers[0]
+    source_shape = source_layer.shapes[0]
+    source_shape.add_keyframe("x", 1000, 0.7)
+
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": pygame.K_d, "mod": pygame.KMOD_CTRL, "unicode": "d"},
+        )
+    )
+
+    assert len(editor.project.layers) == 2
+    clone_layer = editor.project.layers[1]
+    assert editor.active_layer == 1
+    assert clone_layer.name == "Layer 1 copy"
+    assert clone_layer.id != source_layer.id
+    assert clone_layer.shapes[0].id != source_shape.id
+    assert clone_layer.shapes[0].keyframes["x"][0].value == 0.7
+    assert editor.selected is clone_layer.shapes[0]
+
+    editor._undo()
+    assert len(editor.project.layers) == 1
+
+
 def test_duration_can_be_entered_manually():
     editor = make_editor()
     editor._action("edit_duration")
@@ -279,6 +306,76 @@ def test_playhead_and_keyframe_snap_to_frames_in_frame_ruler_mode():
     editor._move_keyframe(target_x, timeline)
     moved = editor.selected.keyframes["x"][0].time_ms
     assert abs(moved / frame_ms - round(moved / frame_ms)) < 0.02
+
+
+def test_right_drag_selects_multiple_keyframes_and_offsets_them_together():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.add_keyframe("x", 1000, 0.4)
+    editor.selected.add_keyframe("x", 2000, 0.6)
+    _, _, timeline = editor.layout()
+    row_y = editor._selected_timeline_row_y(timeline)
+    first_x = round(editor._time_to_timeline_x(1000, timeline))
+    second_x = round(editor._time_to_timeline_x(2000, timeline))
+    start = (first_x - 12, row_y - 10)
+    end = (second_x + 12, row_y + 10)
+
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 3, "pos": start})
+    )
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": end, "rel": (0, 0), "buttons": (0, 0, 1)},
+        )
+    )
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 3, "pos": end})
+    )
+    assert {time for _shape, _prop, time in editor.selected_keyframes} == {1000, 2000}
+
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (first_x, row_y)},
+        )
+    )
+    target_x = round(editor._time_to_timeline_x(1500, timeline))
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": (target_x, row_y), "rel": (0, 0), "buttons": (1, 0, 0)},
+        )
+    )
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONUP,
+            {"button": 1, "pos": (target_x, row_y)},
+        )
+    )
+
+    moved_times = [frame.time_ms for frame in editor.selected.keyframes["x"]]
+    assert moved_times == [1500, 2500]
+    assert moved_times[1] - moved_times[0] == 1000
+
+
+def test_color_palette_applies_to_every_selected_keyframe_time():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.add_keyframe("x", 1000, 0.4)
+    editor.selected.add_keyframe("x", 2000, 0.6)
+    editor.selected_keyframes = {
+        (editor.selected.id, "x", 1000),
+        (editor.selected.id, "x", 2000),
+    }
+
+    editor._action("color:4")
+
+    color_frames = editor.selected.keyframes["color"]
+    assert [frame.time_ms for frame in color_frames] == [1000, 2000]
+    assert [frame.value for frame in color_frames] == [(30, 180, 255), (30, 180, 255)]
+    assert (editor.selected.id, "color", 1000) in editor.selected_keyframes
+    assert (editor.selected.id, "color", 2000) in editor.selected_keyframes
 
 
 def test_project_save_load_round_trip_and_dirty_state(tmp_path):

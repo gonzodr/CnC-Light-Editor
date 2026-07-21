@@ -69,6 +69,9 @@ class Editor:
         self.drag_key_time: int | None = None
         self.selected_keyframes: set[tuple[str, str, int]] = set()
         self.context_menu_pos: tuple[int, int] | None = None
+        self.keyframe_marquee_current: tuple[int, int] | None = None
+        self.keyframe_marquee_additive = False
+        self.keyframe_right_click_time: int | None = None
         self.drag_layer_index: int | None = None
         self.tool_drag: str | None = None
         self.scrub_prop: str | None = None
@@ -183,14 +186,13 @@ class Editor:
                 self.context_menu_pos = None
                 return
             if event.button == 3:
-                key_time = self._pick_keyframe(event.pos, timeline) if timeline.collidepoint(event.pos) else None
-                if key_time is not None:
-                    keys = self._keyframe_keys_at(key_time)
-                    if not self.selected_keyframes.intersection(keys):
-                        self.selected_keyframes = keys
-                    self.context_menu_pos = event.pos
-                else:
-                    self.context_menu_pos = None
+                self.context_menu_pos = None
+                if timeline.collidepoint(event.pos) and not self._active_imported_effect():
+                    self.drag_mode = "keyframe_marquee"
+                    self.drag_origin = event.pos
+                    self.keyframe_marquee_current = event.pos
+                    self.keyframe_marquee_additive = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
+                    self.keyframe_right_click_time = self._pick_keyframe(event.pos, timeline)
                 return
             if self.calibration and self.drag_mode == "led_move" and event.button == 1:
                 if canvas.collidepoint(event.pos):
@@ -238,7 +240,7 @@ class Editor:
                             self.selected_keyframes.difference_update(keys)
                         else:
                             self.selected_keyframes.update(keys)
-                    else:
+                    elif not self.selected_keyframes.intersection(keys):
                         self.selected_keyframes = keys
                     self.drag_mode = "keyframe"
                     self.drag_key_time = key_time
@@ -285,6 +287,9 @@ class Editor:
                 return
 
         if event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 3 and self.drag_mode == "keyframe_marquee":
+                self._finish_keyframe_right_gesture(event.pos, timeline)
+                return
             if event.button in (1, 2):
                 if self.drag_mode == "led_move":
                     return
@@ -320,6 +325,8 @@ class Editor:
                 self._set_playhead(event.pos[0], timeline)
             elif self.drag_mode == "keyframe" and self.drag_key_time is not None:
                 self._move_keyframe(event.pos[0], timeline)
+            elif self.drag_mode == "keyframe_marquee":
+                self.keyframe_marquee_current = event.pos
             elif self.drag_mode == "duration":
                 self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
             elif self.drag_mode == "led_move":
@@ -356,7 +363,7 @@ class Editor:
             self._redo()
             return
         if ctrl and event.key == pygame.K_d:
-            self._action("duplicate")
+            self._action("duplicate_layer")
             return
         if ctrl and event.key == pygame.K_i:
             self._action("import_effect_data")
@@ -421,7 +428,7 @@ class Editor:
     def _action(self, action: str) -> None:
         mutating = (
             action.startswith(("add:", "color:", "fill_mode:", "toggle_layer:"))
-            or action in {"layer", "delete_layer", "delete", "duplicate", "keyframe"}
+            or action in {"layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe"}
         )
         if mutating:
             self._begin_change()
@@ -431,6 +438,19 @@ class Editor:
             self.project.layers.append(Layer(f"Layer {len(self.project.layers) + 1}"))
             self.active_layer = len(self.project.layers) - 1
             self.selected = None
+        elif action == "duplicate_layer":
+            source = self.project.layers[self.active_layer]
+            selected_index = source.shapes.index(self.selected) if self.selected in source.shapes else None
+            clone = deepcopy(source)
+            clone.id = uuid4().hex[:10]
+            clone.name = f"{source.name} copy"
+            for shape in clone.shapes:
+                shape.id = uuid4().hex[:10]
+            self.project.layers.insert(self.active_layer + 1, clone)
+            self.active_layer += 1
+            self.selected = clone.shapes[selected_index] if selected_index is not None else None
+            self.selected_keyframes.clear()
+            self.status = f"Duplicated layer: {source.name}"
         elif action == "delete_layer":
             if len(self.project.layers) == 1:
                 self.status = "A project must keep at least one layer"
@@ -569,7 +589,18 @@ class Editor:
                 self.led_map.save(self.led_map_path)
                 self.status = "LED map marked as hardware verified"
         elif action.startswith("color:") and self.selected:
-            self._set_animated("color", PALETTE[int(action.split(":")[1])])
+            color = PALETTE[int(action.split(":")[1])]
+            selected_times = sorted({
+                time_ms for shape_id, _prop, time_ms in self.selected_keyframes
+                if shape_id == self.selected.id
+            })
+            if selected_times:
+                for time_ms in selected_times:
+                    self.selected.add_keyframe("color", time_ms, color)
+                    self.selected_keyframes.add((self.selected.id, "color", time_ms))
+                self.status = f"Color applied to {len(selected_times)} selected keyframes"
+            else:
+                self._set_animated("color", color)
         elif action.startswith("fill_mode:") and self.selected:
             self._set_animated("fill_mode", action.split(":", 1)[1])
         elif action.startswith("select_layer:"):
@@ -815,16 +846,81 @@ class Editor:
     ) -> int | None:
         if not self.selected or self._active_imported_effect():
             return None
-        track = self._timeline_track(timeline)
+        row_y = self._selected_timeline_row_y(timeline)
+        if row_y is None or abs(pos[1] - row_y) > 12:
+            return None
         start, end = self._timeline_window()
         times = {frame.time_ms for frames in self.selected.keyframes.values() for frame in frames}
         for time_ms in times:
             if not start <= time_ms <= end:
                 continue
             x = self._time_to_timeline_x(time_ms, timeline)
-            if abs(pos[0] - x) <= 9 and track.y <= pos[1] <= track.bottom:
+            if abs(pos[0] - x) <= 9:
                 return time_ms
         return None
+
+    def _selected_timeline_row_y(self, timeline: pygame.Rect) -> int | None:
+        if not self.selected:
+            return None
+        layer_index = next(
+            (index for index, layer in enumerate(self.project.layers[:5]) if self.selected in layer.shapes),
+            None,
+        )
+        if layer_index is None:
+            return None
+        return self._timeline_track(timeline).y + 15 + layer_index * 32
+
+    def _keyframes_in_marquee(
+        self, start_pos: tuple[int, int], end_pos: tuple[int, int], timeline: pygame.Rect
+    ) -> set[tuple[str, str, int]]:
+        if not self.selected:
+            return set()
+        row_y = self._selected_timeline_row_y(timeline)
+        if row_y is None:
+            return set()
+        left, right = sorted((start_pos[0], end_pos[0]))
+        top, bottom = sorted((start_pos[1], end_pos[1]))
+        marquee = pygame.Rect(left, top, max(1, right - left), max(1, bottom - top))
+        start, end = self._timeline_window()
+        selected: set[tuple[str, str, int]] = set()
+        times = {frame.time_ms for frames in self.selected.keyframes.values() for frame in frames}
+        for time_ms in times:
+            if not start <= time_ms <= end:
+                continue
+            x = round(self._time_to_timeline_x(time_ms, timeline))
+            if marquee.colliderect(pygame.Rect(x - 8, row_y - 8, 16, 16)):
+                selected.update(self._keyframe_keys_at(time_ms))
+        return selected
+
+    def _finish_keyframe_right_gesture(
+        self, pos: tuple[int, int], timeline: pygame.Rect
+    ) -> None:
+        moved = pygame.Vector2(pos).distance_to(self.drag_origin) >= 5
+        if moved:
+            keys = self._keyframes_in_marquee(self.drag_origin, pos, timeline)
+            if self.keyframe_marquee_additive:
+                self.selected_keyframes.update(keys)
+            else:
+                self.selected_keyframes = keys
+            count = len({time_ms for _shape_id, _prop, time_ms in self.selected_keyframes})
+            self.status = f"Selected {count} keyframe positions"
+        elif self.keyframe_right_click_time is not None:
+            keys = self._keyframe_keys_at(self.keyframe_right_click_time)
+            if self.keyframe_marquee_additive:
+                if self.selected_keyframes.intersection(keys):
+                    self.selected_keyframes.difference_update(keys)
+                else:
+                    self.selected_keyframes.update(keys)
+            else:
+                if not self.selected_keyframes.intersection(keys):
+                    self.selected_keyframes = keys
+                self.context_menu_pos = pos
+        elif not self.keyframe_marquee_additive:
+            self.selected_keyframes.clear()
+        self.drag_mode = None
+        self.keyframe_marquee_current = None
+        self.keyframe_right_click_time = None
+        self.keyframe_marquee_additive = False
 
     def _move_keyframe(self, screen_x: int, timeline: pygame.Rect) -> None:
         if not self.selected or self.drag_key_time is None:
@@ -835,18 +931,21 @@ class Editor:
             new_time = self._snap_time_to_frame(new_time)
         delta = new_time - self.drag_key_time
         keys = self.selected_keyframes or self._keyframe_keys_at(self.drag_key_time)
+        selected_times = [time_ms for shape_id, _prop, time_ms in keys if shape_id == self.selected.id]
+        if selected_times:
+            delta = max(-min(selected_times), min(self.project.duration_ms - max(selected_times), delta))
         updated: set[tuple[str, str, int]] = set()
         for shape_id, prop, old_time in keys:
             if shape_id != self.selected.id:
                 continue
             for frame in self.selected.keyframes.get(prop, []):
                 if frame.time_ms == old_time:
-                    frame.time_ms = max(0, min(self.project.duration_ms, old_time + delta))
+                    frame.time_ms = old_time + delta
                     updated.add((shape_id, prop, frame.time_ms))
             self.selected.keyframes.get(prop, []).sort(key=lambda frame: frame.time_ms)
         self.selected_keyframes = updated
-        self.current_ms = max(0, min(self.project.duration_ms, new_time))
-        self.drag_key_time = new_time
+        self.drag_key_time += delta
+        self.current_ms = self.drag_key_time
 
     def _delete_selected_keyframes(self) -> None:
         if not self.selected_keyframes:
@@ -1729,10 +1828,20 @@ class Editor:
             pygame.draw.polygon(self.screen, (255, 83, 72), [(play_x - 6, rect.y + 20), (play_x + 6, rect.y + 20), (play_x, rect.y + 29)])
             pygame.draw.line(self.screen, (255, 83, 72), (play_x, rect.y + 24), (play_x, track.bottom), 2)
 
+        if self.drag_mode == "keyframe_marquee" and self.keyframe_marquee_current:
+            left, right = sorted((self.drag_origin[0], self.keyframe_marquee_current[0]))
+            top, bottom = sorted((self.drag_origin[1], self.keyframe_marquee_current[1]))
+            marquee = pygame.Rect(left, top, max(1, right - left), max(1, bottom - top)).clip(track)
+            if marquee.width and marquee.height:
+                fill = pygame.Surface(marquee.size, pygame.SRCALPHA)
+                fill.fill((77, 148, 255, 42))
+                self.screen.blit(fill, marquee)
+                pygame.draw.rect(self.screen, (104, 169, 255), marquee, 1)
+
         hint = (
             "Imported firmware preview • Space: play/pause • Next FX: cycle effects"
             if imported else
-            "Wheel: zoom • Shift+wheel: scroll • right-click keyframe: easing/delete"
+            "Right-drag: select keys • Ctrl: add • drag selected key: offset • right-click: menu"
         )
         self.screen.blit(self.small.render(hint, True, (132, 139, 155)), (track.x, rect.bottom - 22))
         pygame.draw.rect(self.screen, (29, 32, 40), zoom_rect, border_radius=3)
@@ -1753,6 +1862,7 @@ class Editor:
 
         y = panel.y + 72
         self.screen.blit(self.font.render("Layers", True, (218, 222, 232)), (x, y))
+        self._button(pygame.Rect(panel.right - 110, y - 3, 28, 25), "duplicate_layer", "D", False)
         self._button(pygame.Rect(panel.right - 76, y - 3, 28, 25), "delete_layer", "−", False)
         self._button(pygame.Rect(panel.right - 42, y - 3, 28, 25), "layer", "+", False)
         y = panel.y + 94
