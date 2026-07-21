@@ -27,6 +27,8 @@ class Shape:
     rotation: float = 0.0
     color: Color = (255, 90, 20)
     opacity: float = 1.0
+    fill_mode: str = "fill"
+    stroke_width: float = 0.012
     visible: bool = True
     id: str = field(default_factory=lambda: uuid4().hex[:10])
     keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
@@ -49,15 +51,17 @@ class Shape:
                 after = frame
                 break
             before = frame
-        if after is None or prop == "visible":
+        if after is None or prop in {"visible", "fill_mode"}:
             return before.value
         span = after.time_ms - before.time_ms
         amount = 0.0 if span == 0 else (time_ms - before.time_ms) / span
+        amount = _ease(amount, after.easing)
         return _lerp(before.value, after.value, amount)
 
     def state_at(self, time_ms: int) -> dict[str, Any]:
         return {prop: self.value_at(prop, time_ms) for prop in (
-            "x", "y", "width", "height", "rotation", "color", "opacity", "visible"
+            "x", "y", "width", "height", "rotation", "color", "opacity",
+            "fill_mode", "stroke_width", "visible",
         )}
 
 
@@ -109,4 +113,15 @@ def _lerp(a: Any, b: Any, amount: float) -> Any:
         return tuple(values) if isinstance(a, tuple) else values
     if isinstance(a, bool):
         return a
-    return a + (b - a) * amount
+    return round(a + (b - a) * amount, 12)
+
+
+def _ease(amount: float, easing: str) -> float:
+    amount = max(0.0, min(1.0, amount))
+    if easing == "ease_in":
+        return amount * amount
+    if easing == "ease_out":
+        return 1.0 - (1.0 - amount) ** 2
+    if easing == "ease_in_out":
+        return amount * amount * (3.0 - 2.0 * amount)
+    return amount

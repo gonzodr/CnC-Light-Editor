@@ -29,3 +29,37 @@ def test_hidden_layer_does_not_reach_led():
     shape = Shape("ellipse", "fill", width=1.0, height=1.0, color=(255, 0, 0))
     project = Project(layers=[Layer("hidden", visible=False, shapes=[shape])])
     assert render_leds(project, [(0.5, 0.5)], 0) == [(0, 0, 0)]
+
+
+def test_easing_changes_interpolation_curve():
+    shape = Shape("ellipse", "ease", x=0.0)
+    shape.add_keyframe("x", 0, 0.0)
+    shape.add_keyframe("x", 1000, 1.0)
+    shape.keyframes["x"][1].easing = "ease_in"
+    assert shape.value_at("x", 500) == 0.25
+
+    shape.keyframes["x"][1].easing = "ease_out"
+    assert shape.value_at("x", 500) == 0.75
+
+    shape.keyframes["x"][1].easing = "ease_in_out"
+    assert shape.value_at("x", 500) == 0.5
+
+
+def test_stroked_shape_only_reaches_border_leds():
+    shape = Shape(
+        "rectangle", "outline", x=0.5, y=0.5, width=0.6, height=0.6,
+        color=(120, 80, 40), fill_mode="stroke", stroke_width=0.05,
+    )
+    project = Project(layers=[Layer("outline", shapes=[shape])])
+    assert render_leds(project, [(0.5, 0.5), (0.78, 0.5)], 0) == [
+        (0, 0, 0), (120, 80, 40),
+    ]
+
+
+def test_opacity_is_precomposited_into_rgb():
+    shape = Shape(
+        "rectangle", "half", width=1.0, height=1.0,
+        color=(200, 100, 40), opacity=0.5,
+    )
+    project = Project(layers=[Layer("opacity", shapes=[shape])])
+    assert render_leds(project, [(0.5, 0.5)], 0) == [(100, 50, 20)]

@@ -14,14 +14,27 @@ def point_inside(shape: Shape, state: dict, point: tuple[float, float]) -> bool:
     y = dx * sin(angle) + dy * cos(angle)
     half_w = max(float(state["width"]) / 2, 0.0001)
     half_h = max(float(state["height"]) / 2, 0.0001)
+    fill_mode = state.get("fill_mode", "fill")
+    stroke = max(0.0005, float(state.get("stroke_width", 0.012)))
     if shape.kind == "ellipse":
-        return (x / half_w) ** 2 + (y / half_h) ** 2 <= 1
+        outer = (x / half_w) ** 2 + (y / half_h) ** 2 <= 1
+        inner_w, inner_h = half_w - stroke, half_h - stroke
+        inner = inner_w > 0 and inner_h > 0 and (x / inner_w) ** 2 + (y / inner_h) ** 2 < 1
+        return outer and (fill_mode == "fill" or not inner)
     if shape.kind == "rectangle":
-        return abs(x) <= half_w and abs(y) <= half_h
+        outer = abs(x) <= half_w and abs(y) <= half_h
+        inner = abs(x) < half_w - stroke and abs(y) < half_h - stroke
+        return outer and (fill_mode == "fill" or not inner)
     if shape.kind == "triangle":
-        return _in_triangle(x, y, 0.0, -half_h, half_w, half_h, -half_w, half_h)
+        outer = _in_triangle(x, y, 0.0, -half_h, half_w, half_h, -half_w, half_h)
+        inner_w, inner_h = half_w - stroke, half_h - stroke
+        inner = inner_w > 0 and inner_h > 0 and _in_triangle(
+            x, y, 0.0, -inner_h, inner_w, inner_h, -inner_w, inner_h
+        )
+        return outer and (fill_mode == "fill" or not inner)
     if shape.kind == "line":
-        return _distance_to_segment(x, y, -half_w, 0.0, half_w, 0.0) <= half_h
+        thickness = stroke if fill_mode == "stroke" else half_h
+        return _distance_to_segment(x, y, -half_w, 0.0, half_w, 0.0) <= thickness
     return False
 
 

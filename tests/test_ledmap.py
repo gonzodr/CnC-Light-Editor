@@ -31,3 +31,9 @@ def test_round_trip_preserves_mapping(tmp_path):
     led_map.save(path)
     loaded = LedMap.load(path)
     assert loaded == led_map
+
+
+def test_null_name_creates_disabled_export_slot():
+    led_map = make_map()
+    led_map.leds[1].name = "NULL"
+    assert led_map.export_slots() == [(0.1, 0.1), None]

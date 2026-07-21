@@ -11,6 +11,7 @@ class Led:
     firmware_index: int
     x: float
     y: float
+    name: str = ""
 
 
 @dataclass
@@ -29,7 +30,16 @@ class LedMap:
         return cls(
             width=canvas["width"],
             height=canvas["height"],
-            leds=[Led(**led) for led in raw["leds"]],
+            leds=[
+                Led(
+                    id=led["id"],
+                    firmware_index=led["firmware_index"],
+                    x=led["x"],
+                    y=led["y"],
+                    name=led.get("name", f"LED {led['id']:02d}"),
+                )
+                for led in raw["leds"]
+            ],
             mapping_status=raw.get("mapping_status", "provisional_spatial_order"),
             schema_version=raw.get("schema_version", 1),
             notes=raw.get("notes", ""),
@@ -42,7 +52,13 @@ class LedMap:
             "mapping_status": self.mapping_status,
             "notes": self.notes,
             "leds": [
-                {"id": led.id, "firmware_index": led.firmware_index, "x": led.x, "y": led.y}
+                {
+                    "id": led.id,
+                    "firmware_index": led.firmware_index,
+                    "x": led.x,
+                    "y": led.y,
+                    "name": led.name,
+                }
                 for led in self.leds
             ],
         }
@@ -51,6 +67,13 @@ class LedMap:
     def normalized_points(self, firmware_order: bool = False) -> list[tuple[float, float]]:
         leds = sorted(self.leds, key=lambda led: led.firmware_index) if firmware_order else self.leds
         return [(led.x / self.width, led.y / self.height) for led in leds]
+
+    def export_slots(self) -> list[tuple[float, float] | None]:
+        slots: list[tuple[float, float] | None] = [None] * len(self.leds)
+        for led in self.leds:
+            if led.name.strip().upper() != "NULL":
+                slots[led.firmware_index] = (led.x / self.width, led.y / self.height)
+        return slots
 
     def validate(self, require_contiguous: bool = True) -> list[str]:
         errors: list[str] = []
