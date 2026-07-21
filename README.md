@@ -17,6 +17,8 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Pozíció-, scale-, forgatás-, szín-, opacity- és visibility-keyframe.
 - Lineáris interpoláció és idővonalas lejátszás.
 - Stencil mód: kizárólag a LED-nyílásokban látszik a kompozitált animáció.
+- Kalibrációs nézet kattintható LED-helyekkel és ütközésmentes firmware-index cserével.
+- Az export validálja a `0..58` indextartományt, majd firmware-sorrendben generál.
 - JSON projektmentés és visszatöltés.
 - Arduino `PROGMEM` header export; az egymást követő azonos frame-ek automatikusan összevonódnak.
 
@@ -52,6 +54,17 @@ cnc-light-editor
 
 A toolbar `Arduino export` gombja az `exports/cnc_effect.h` fájlt generálja. A projekt alapértelmezetten a `projects/current.cnclight` fájlba ment.
 
+## LED-kalibráció
+
+1. Töltsd fel ideiglenesen a `firmware/playfield_led_calibration.ino` sketch-et az Arduino Megára.
+2. Nyisd meg a Serial Monitort `115200` baud sebességgel.
+3. Az `n` és `p` parancsokkal léptesd az egyetlen világító LED-et, vagy küldj egy `0..58` indexet.
+4. Az editorban válaszd a `Calibrate` módot, kattints a világító grafikai LED-helyre, majd az `Index -/+` gombokkal rendeld hozzá a kijelzett firmware-indexet.
+5. Mentsd a térképet. Csak a teljes fizikai ellenőrzés után használd a `Mark hardware verified` gombot.
+6. A kalibráció után töltsd vissza a normál flipper firmware-t.
+
+Az indexmódosítás csereként működik: ha egy index már foglalt, a két LED indexe felcserélődik. Emiatt a térkép minden lépés után egyedi és exportálható marad.
+
 ## Tesztelés
 
 ```powershell
@@ -59,8 +72,10 @@ pytest
 python -m cnc_light_editor.app --smoke-test --screenshot smoke.png
 ```
 
+Minden push és pull request ugyanezeket a teszteket, valamint a Pygame headless smoke tesztjét GitHub Actionsben is lefuttatja.
+
 ## Következő mérföldkő
 
-A firmware-be kerülő diagnosztikai mód egyenként felvillantja a playfield LED-jeit. Az editor kalibrációs nézetében minden felvillanó LED-hez hozzá lehet majd rendelni a megfelelő grafikai pozíciót. Ezzel a most ideiglenes indexsorrend véglegessé tehető anélkül, hogy a geometriára épülő animációkat újra kellene rajzolni.
+Közvetlen soros kapcsolat az editor és az Arduino diagnosztikai módja között, hogy a `Next` gomb egyben a hardveren is a következő LED-re váltson.
 
-Az artwork és a DXF a gép saját gyártási anyaga; a repository publikussá tétele előtt a felhasználási jogokat külön ellenőrizni kell.
+Az artwork és a DXF a gép saját gyártási anyaga. A repository jelenleg nem tartalmaz külön nyílt forrású licencet, ezért a GitHub alapértelmezett szerzői jogi szabályai érvényesek.

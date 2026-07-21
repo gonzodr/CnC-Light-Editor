@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 
@@ -9,6 +8,7 @@ import pygame
 
 from .engine import point_inside, render_leds
 from .exporter import export_arduino_header
+from .ledmap import LedMap
 from .model import Layer, Project, Shape
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,14 +31,16 @@ class Editor:
         self.current_ms = 0
         self.playing = False
         self.stencil = False
+        self.calibration = False
+        self.selected_led_id = 0
         self.active_layer = 0
         self.selected: Shape | None = None
         self.dragging = False
         self.status = "Ready — 59 playfield LEDs"
         self.buttons: list[tuple[pygame.Rect, str, str]] = []
-        self.led_data = json.loads((ROOT / "data" / "led_map.json").read_text(encoding="utf-8"))
-        canvas = self.led_data["canvas"]
-        self.led_points = [(led["x"] / canvas["width"], led["y"] / canvas["height"]) for led in self.led_data["leds"]]
+        self.led_map_path = ROOT / "data" / "led_map.json"
+        self.led_map = LedMap.load(self.led_map_path)
+        self.led_points = self.led_map.normalized_points()
         self.playfield = pygame.image.load(str(ROOT / "assets" / "playfield.png")).convert_alpha()
         self._add_demo_shape()
 
@@ -101,8 +103,12 @@ class Editor:
                 return
             if canvas.collidepoint(event.pos):
                 point = self._screen_to_world(event.pos, canvas)
-                self.selected = self._pick(point)
-                self.dragging = self.selected is not None
+                if self.calibration:
+                    self.selected_led_id = self._pick_led(point)
+                    self.status = f"Selected LED position {self.selected_led_id}"
+                else:
+                    self.selected = self._pick(point)
+                    self.dragging = self.selected is not None
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.dragging = False
         elif event.type == pygame.MOUSEMOTION and self.dragging and self.selected:
@@ -117,6 +123,19 @@ class Editor:
 
     def _handle_key(self, event: pygame.event.Event) -> None:
         ctrl = bool(event.mod & pygame.KMOD_CTRL)
+        if self.calibration:
+            if event.key in (pygame.K_TAB, pygame.K_RIGHT):
+                self._action("led_next")
+            elif event.key == pygame.K_LEFT:
+                self._action("led_prev")
+            elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                self._action("led_index:1")
+            elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                self._action("led_index:-1")
+            elif event.key == pygame.K_s and ctrl:
+                self._action("save_map")
+            return
+
         if event.key == pygame.K_SPACE:
             self.playing = not self.playing
         elif event.key == pygame.K_s and ctrl:
@@ -161,6 +180,14 @@ class Editor:
             self.status = f"Keyframe at {self.current_ms} ms"
         elif action == "stencil":
             self.stencil = not self.stencil
+            if self.stencil:
+                self.calibration = False
+        elif action == "calibration":
+            self.calibration = not self.calibration
+            if self.calibration:
+                self.stencil = False
+            self.playing = False
+            self.selected = None
         elif action == "play":
             self.playing = not self.playing
         elif action == "save":
@@ -173,8 +200,35 @@ class Editor:
                 self.active_layer = 0
                 self.status = f"Loaded: {PROJECT_FILE.name}"
         elif action == "export":
-            export_arduino_header(self.project, self.led_points, EXPORT_FILE)
-            self.status = f"Exported: {EXPORT_FILE.name}"
+            errors = self.led_map.validate()
+            if errors:
+                self.status = "Export blocked: " + "; ".join(errors)
+            else:
+                points = self.led_map.normalized_points(firmware_order=True)
+                export_arduino_header(self.project, points, EXPORT_FILE)
+                self.status = f"Exported in firmware order: {EXPORT_FILE.name}"
+        elif action == "led_prev":
+            self.selected_led_id = (self.selected_led_id - 1) % len(self.led_map.leds)
+        elif action == "led_next":
+            self.selected_led_id = (self.selected_led_id + 1) % len(self.led_map.leds)
+        elif action.startswith("led_index:"):
+            led = next(item for item in self.led_map.leds if item.id == self.selected_led_id)
+            delta = int(action.split(":")[1])
+            target = max(0, min(len(self.led_map.leds) - 1, led.firmware_index + delta))
+            self.led_map.set_firmware_index(led.id, target, swap=True)
+            self.led_map.mapping_status = "calibration_in_progress"
+            self.status = f"LED position {led.id} → firmware index {target}"
+        elif action == "save_map":
+            self.led_map.save(self.led_map_path)
+            self.status = "LED map saved"
+        elif action == "map_verified":
+            errors = self.led_map.validate()
+            if errors:
+                self.status = "Cannot verify: " + "; ".join(errors)
+            else:
+                self.led_map.mapping_status = "hardware_verified"
+                self.led_map.save(self.led_map_path)
+                self.status = "LED map marked as hardware verified"
         elif action.startswith("color:") and self.selected:
             self._set_animated("color", PALETTE[int(action.split(":")[1])])
         elif action.startswith("select_layer:"):
@@ -206,8 +260,16 @@ class Editor:
     def _screen_to_world(pos: tuple[int, int], canvas: pygame.Rect) -> tuple[float, float]:
         return ((pos[0] - canvas.x) / canvas.width, (pos[1] - canvas.y) / canvas.height)
 
+    def _pick_led(self, point: tuple[float, float]) -> int:
+        best = min(
+            zip(self.led_map.leds, self.led_points),
+            key=lambda item: (item[1][0] - point[0]) ** 2 + (item[1][1] - point[1]) ** 2,
+        )
+        return best[0].id
+
     def draw(self) -> None:
         self.screen.fill((22, 24, 31))
+
         canvas, panel, timeline = self.layout()
         self.buttons.clear()
         self._draw_toolbar()
@@ -231,13 +293,14 @@ class Editor:
             ("layer", "+ Layer"), ("delete", "Delete"),
             ("keyframe", "Keyframe"), ("play", "Pause" if self.playing else "Play"),
             ("stencil", "Edit view" if self.stencil else "Stencil"),
+            ("calibration", "Edit view" if self.calibration else "Calibrate"),
             ("save", "Save"), ("load", "Load"), ("export", "Arduino export"),
         ]
         x = 18
         for action, label in items:
             width = max(64, self.small.size(label)[0] + 18)
             rect = pygame.Rect(x, 18, width, 32)
-            active = action == "stencil" and self.stencil
+            active = (action == "stencil" and self.stencil) or (action == "calibration" and self.calibration)
             self._button(rect, action, label, active)
             x += width + 7
 
@@ -273,16 +336,21 @@ class Editor:
     def _draw_leds(self, canvas: pygame.Rect) -> None:
         colors = render_leds(self.project, self.led_points, self.current_ms)
         radius = max(3, min(9, canvas.width // 90))
-        for index, ((x, y), color) in enumerate(zip(self.led_points, colors)):
+        for led, (x, y), color in zip(self.led_map.leds, self.led_points, colors):
             pos = (canvas.x + int(x * canvas.width), canvas.y + int(y * canvas.height))
             if self.stencil:
                 glow = tuple(max(20, c) for c in color) if any(color) else (22, 24, 30)
                 pygame.draw.circle(self.screen, glow, pos, radius + 3)
                 pygame.draw.circle(self.screen, color, pos, radius)
+            elif self.calibration:
+                selected = led.id == self.selected_led_id
+                marker = (255, 225, 55) if selected else (70, 205, 255)
+                pygame.draw.circle(self.screen, marker, pos, radius + (4 if selected else 0), 0 if selected else 2)
             else:
                 pygame.draw.circle(self.screen, (240, 70, 55), pos, radius, 2)
-            if canvas.width > 620:
-                self.screen.blit(self.small.render(str(index), True, (245, 245, 245)), (pos[0] + radius, pos[1] - radius))
+            if canvas.width > 620 or self.calibration:
+                label = str(led.firmware_index)
+                self.screen.blit(self.small.render(label, True, (245, 245, 245)), (pos[0] + radius, pos[1] - radius))
 
     def _draw_timeline(self, rect: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, (32, 35, 45), rect, border_radius=5)
@@ -303,7 +371,11 @@ class Editor:
         pygame.draw.rect(self.screen, (29, 32, 41), panel, border_radius=6)
         x, y = panel.x + 14, panel.y + 14
         self.screen.blit(self.title.render("CnC Light Editor", True, (245, 246, 250)), (x, y)); y += 38
-        self.screen.blit(self.small.render("59 playfield LEDs • provisional index map", True, (255, 180, 75)), (x, y)); y += 34
+        map_label = f"59 playfield LEDs • {self.led_map.mapping_status}"
+        self.screen.blit(self.small.render(map_label, True, (255, 180, 75)), (x, y)); y += 34
+        if self.calibration:
+            self._draw_calibration_panel(panel, x, y)
+            return
         self.screen.blit(self.font.render("Layers", True, (220, 223, 232)), (x, y)); y += 27
         for index, layer in enumerate(self.project.layers):
             eye = pygame.Rect(x, y, 26, 25)
@@ -336,6 +408,42 @@ class Editor:
         self.screen.blit(self.font.render("Controls", True, (220, 223, 232)), (x, y)); y += 27
         for tip in tips:
             self.screen.blit(self.small.render(tip, True, (168, 173, 188)), (x, y)); y += 19
+        self.screen.blit(self.small.render(self.status, True, (95, 215, 160)), (x, panel.bottom - 28))
+
+    def _draw_calibration_panel(self, panel: pygame.Rect, x: int, y: int) -> None:
+        led = next(item for item in self.led_map.leds if item.id == self.selected_led_id)
+        self.screen.blit(self.font.render("LED calibration", True, (220, 223, 232)), (x, y)); y += 32
+        details = [
+            f"Graphic position ID: {led.id}",
+            f"Firmware index: {led.firmware_index}",
+            f"Pixel: {led.x:.0f}, {led.y:.0f}",
+        ]
+        for line in details:
+            self.screen.blit(self.small.render(line, True, (205, 209, 221)), (x, y)); y += 22
+        y += 12
+        buttons = [
+            ("led_prev", "Previous"), ("led_index:-1", "Index -"),
+            ("led_index:1", "Index +"), ("led_next", "Next"),
+        ]
+        for index, (action, label) in enumerate(buttons):
+            rect = pygame.Rect(x + (index % 2) * 132, y + (index // 2) * 38, 122, 30)
+            self._button(rect, action, label, False)
+        y += 88
+        self._button(pygame.Rect(x, y, 254, 32), "save_map", "Save LED map", False); y += 40
+        self._button(pygame.Rect(x, y, 254, 32), "map_verified", "Mark hardware verified", False); y += 52
+        errors = self.led_map.validate()
+        validity = "Mapping is contiguous and unique" if not errors else "; ".join(errors)
+        validity_color = (95, 215, 160) if not errors else (255, 100, 90)
+        self.screen.blit(self.small.render(validity, True, validity_color), (x, y)); y += 34
+        tips = [
+            "Click the LED position that lit up.",
+            "Use Index +/- to swap chain indices.",
+            "Tab / arrows: next or previous marker.",
+            "Ctrl+S: save the mapping.",
+            "Only verify after a hardware test.",
+        ]
+        for tip in tips:
+            self.screen.blit(self.small.render(tip, True, (168, 173, 188)), (x, y)); y += 21
         self.screen.blit(self.small.render(self.status, True, (95, 215, 160)), (x, panel.bottom - 28))
 
     def _button(self, rect: pygame.Rect, action: str, label: str, active: bool) -> None:
