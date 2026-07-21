@@ -4,27 +4,29 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 
 ## Jelenlegi hatókör
 
-- Alapértelmezetten a playfield alatt azonosított 59 LED; a térkép az editorban legfeljebb 68 firmware-slotig bővíthető.
+- A baked-frame firmware-rel közös, 68 LED-es playfield-térkép (`0..67`).
 - A `data/led_map.json` pozíciói képfeldolgozással készültek a kapott jelöléses rajzból.
 - A LED-ek `firmware_index` értékei egyelőre ideiglenes térbeli sorrendet jelentenek. A fizikai WS2812B-lánccal történő kalibrálás előtt ne kerüljenek végleges firmware-be.
 - A firmware további 56 LED-je szándékosan nincs az editorban.
 
 ## Már működő funkciók
 
-- Eredeti playfield-grafika és 59 pontos LED-overlay.
+- Eredeti playfield-grafika és 68 pontos LED-overlay.
 - Ellipszis, téglalap, háromszög és vonal alakzat.
 - Több, külön ki- és bekapcsolható layer.
 - Pozíció-, scale-, forgatás-, szín-, opacity-, stroke- és visibility-keyframe.
 - Linear, Ease In, Ease Out és Ease In/Out interpoláció, kijelölhető keyframe-ek és idővonalas lejátszás.
 - Fill/stroke alakzatmód, állítható körvonalvastagság.
+- Solid, tetszőleges számú húzható színstoppal szerkeszthető Linear és Radial gradient fill; a Linear iránya 0–360° között állítható.
+- Layer-szintű, shape-független Random LED / Sparkle effekt determinisztikus seeddel, life, born speed, maximális aktív elemszám és szín paraméterekkel. Az enabled állapot keyframe-elhető.
 - Edit nézet: a DXF-ből képzett fehér vonalas guide jelenik meg sötét háttéren.
 - Stencil mód: nagy, additívan keveredő fényforrások világítanak az alfa-lyukas playfield artwork mögött.
 - Kalibrációs nézet húzható, hozzáadható és törölhető LED-helyekkel, beírható firmware-ID-vel, LED-nevekkel és ütközésmentes indexcserével.
-- Meglévő `effect_data.h` firmware-effektek importja, effektválasztása és idővonalas lejátszása.
+- V4 baked-RGB `effect_data.h` import, effektválasztás és loop/outro-hű idővonalas lejátszás; a régi `EffectID...` maszkfájlok olvasása kompatibilitási módként megmaradt.
 - A `NULL` nevű LED-slotok előnézetben és exportban kikapcsolva maradnak.
-- Az export validálja a `0..58` playfield-indextartományt, majd 68 LED-es firmware-frame-et generál; az utolsó 9 LED RGB-értéke nulla.
+- Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál. A `NULL` slot RGB-je fekete.
 - JSON projektmentés és visszatöltés.
-- Arduino `PROGMEM` header export; az egymást követő azonos frame-ek automatikusan összevonódnak.
+- A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops` és `loopFrames` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
 
 ## Telepítés Windows alatt
 
@@ -55,32 +57,36 @@ cnc-light-editor
 - Inspector: az X/Y/W/H/ROT/OPACITY mezőket vízszintesen húzva finoman állíthatod.
 - Layer-sorrend: húzd a layer sorát fel vagy le. A timeline layernevére kattintva aktiválhatod; az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig törli az aktív layert.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
+- Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.
 - Több keyframe kijelölése: jobb egérgombbal húzz kijelölőkeretet a timeline-on; `Ctrl` mellett a találatok hozzáadódnak a meglévő kijelöléshez. `Ctrl` + jobb kattintással egyenként is hozzáadhatsz vagy kivehetsz keyframe-eket.
 - Keyframe-offset: fogd meg bármelyik kijelölt gyémántot; a teljes kijelölés együtt mozog, az egymás közötti időeltolás megtartásával.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
-- Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél a 60 ms-os firmware-frame-eket mutatja.
+- Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél az effekt saját `frameMs` értékét használja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
 - Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében. A stroke mező vízszintesen húzható, kattintás után pedig kézzel is beírható `0,1–5,0` között.
+- Gradient: Fill módban nyisd meg a `Gradient fill…` panelt. Kattints a colorbarra új stophoz, húzd a stopokat, majd adj színt a kijelölt stopnak. A Solid/Linear/Radial mód és a Linear angle ugyanitt állítható.
+- Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A panel élő flash- és lejátszási időbecslést mutat.
+- Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. A Toggle az aktuális időnél keyframe-et hoz létre, a `+ Key` megtartja az aktuális enabled állapotot.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; aktív layer duplikálása: `Ctrl+D`.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.
 - Snap ki/be: `G`. Bekapcsolva az alakzat pozícióját és méretét 0,01-es normalizált rácsra, a forgatást 15°-ra, a keyframe idejét pedig FPS-képkockahatárra igazítja; kikapcsolva minden folyamatosan mozgatható.
 - Projektmentés/betöltés: `Ctrl+S`, `Ctrl+O`; Save As: `Ctrl+Shift+S`. Az első mentés fájlnevet kér, a további mentések ugyanazt a `.cnclight` fájlt frissítik.
 - A jobb oldali színminták az aktuális playheadnél hoznak létre szín-keyframe-et. Többszörös keyframe-kijelölésnél a kiválasztott szín minden kijelölt időpontra egyszerre kerül rá.
 
-A toolbar `Export` gombja az `exports/cnc_effect.h` fájlt generálja. A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
+A toolbar `Export` gombja az `exports/effect_data.h` fájlt generálja. A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
 
-A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a felismert `EffectID` tömböket, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
+A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a `bakedEffects[]` leírókat, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
-Az editor az opacityt az exportált RGB-csatornákba előre belekeveri. A jelenlegi `d_light_effects.ino` motor ezzel szemben 68 elemű maszk-/palettakódos `uint8_t` frame-eket olvas, és nincs külön opacity csatornája; a `fadeToBlackBy` csak globális időbeli utánfényt ad. Az editor RGB-exportjához ezért a firmware-ben később külön RGB-frame lejátszó szükséges.
+Az editor minden opacityt, easinget, gradientet és generatív effektet előre belesüt a frame-ek RGB-értékeibe. A V4 motor kizárólag ezeket a kész képkockákat játssza le. A loop első `loopFrames` képkockája `loops` alkalommal ismétlődik, a maradék outro egyszer fut le; az ID explicit és nem függ a táblasorrendtől.
 
 ## LED-kalibráció
 
 1. Töltsd fel ideiglenesen a `firmware/playfield_led_calibration.ino` sketch-et az Arduino Megára.
 2. Nyisd meg a Serial Monitort `115200` baud sebességgel.
-3. Az `n` és `p` parancsokkal léptesd az egyetlen világító LED-et, vagy küldj egy `0..58` indexet.
+3. Az `n` és `p` parancsokkal léptesd az egyetlen világító LED-et, vagy küldj egy `0..67` indexet.
 4. Az editorban válaszd a `LED map` módot. Az első kattintás kijelöli a LED-et, a kijelölt LED-re adott második kattintás elindítja a mozgatást. Mozgasd az egeret gombnyomás nélkül, majd kattints a rögzítéshez; az `Esc` visszaállítja az eredeti pozíciót.
-5. Az `Assigned LED ID` mezőbe írd be a fizikai lánc `0..58` indexét. Az ütköző indexek automatikusan felcserélődnek.
+5. Az `Assigned LED ID` mezőbe írd be a fizikai lánc `0..67` indexét. Az ütköző indexek automatikusan felcserélődnek.
 6. Adj nevet a LED-nek. A `NULL` név kikapcsolja az adott firmware-slotot az előnézetben és az exportban.
    A névmező támogatja a `Ctrl+V` beillesztést is.
 7. A `Position −/+` a grafikai helyek, a `LED ID −/+` a fizikai lánc sorrendjében léptet. Az `Add LED` középre tesz egy új pontot, a `Delete LED` törli a kijelöltet és folytonosra zárja a firmware-indexeket. A `Save LED map` a pozíciókat, ID-ket és neveket is elmenti.

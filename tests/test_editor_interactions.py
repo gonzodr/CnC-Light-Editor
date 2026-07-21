@@ -6,7 +6,8 @@ import pygame
 
 from cnc_light_editor.app import Editor
 from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect
-from cnc_light_editor.model import Project
+from cnc_light_editor.exporter import sample_project_frames
+from cnc_light_editor.model import Layer, Project, Shape
 
 
 def make_editor() -> Editor:
@@ -562,3 +563,109 @@ def test_stencil_glows_mix_overlapping_led_colors():
     assert pixel.r > 100
     assert pixel.b > 100
     assert pixel.g == 0
+
+
+def test_gradient_editor_adds_moves_and_recolors_stops():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+
+    editor._action("gradient_editor")
+    editor._action("gradient_type:linear")
+    editor._action("gradient_add_stop")
+
+    assert editor.gradient_editor_open is True
+    assert editor.selected.gradient_type == "linear"
+    assert len(editor.selected.gradient_stops) == 3
+    selected = editor._selected_gradient_stop()
+    editor._action("color:4")
+    assert selected.color == (30, 180, 255)
+
+    bar = editor._gradient_bar_rect()
+    editor._move_gradient_stop(bar.x + round(bar.width * 0.73))
+    assert abs(selected.position - 0.73) < 0.01
+
+    angle = editor._gradient_angle_rect()
+    editor._set_gradient_angle_from_x(angle.centerx)
+    assert editor.selected.gradient_angle == 180.0
+
+
+def test_gradient_panel_exposes_type_stop_and_angle_controls():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    editor._action("gradient_editor")
+    editor._action("gradient_type:linear")
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+
+    assert {"gradient_type:linear", "gradient_type:radial", "gradient_bar", "gradient_angle"} <= actions
+
+
+def test_random_led_editor_creates_effect_and_keyframes_enabled_state():
+    editor = make_editor()
+
+    editor._action("random_led_editor")
+    effect = editor._active_random_led_effect()
+    editor.current_ms = 500
+    editor._action("random_led_toggle")
+
+    assert editor.random_led_editor_open is True
+    assert effect is not None
+    assert effect.value_at("enabled", 499) is True
+    assert effect.value_at("enabled", 500) is False
+    assert editor._keyframe_keys_at(500) == {(effect.id, "enabled", 500)}
+
+
+def test_random_led_panel_exposes_requested_parameters():
+    editor = make_editor()
+    editor._action("random_led_editor")
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+
+    assert {
+        "random_led_seed:-1", "random_led_life:50", "random_led_birth:1",
+        "random_led_count:1", "random_led_toggle", "random_led_keyframe",
+    } <= actions
+
+
+def test_random_led_preview_matches_firmware_order_export():
+    editor = make_editor()
+    editor._action("random_led_editor")
+
+    preview = editor._preview_led_colors()
+    firmware_frame = sample_project_frames(editor.project, editor.led_map.export_slots())[0]
+    firmware_colors = [tuple(firmware_frame[index:index + 3]) for index in range(0, len(firmware_frame), 3)]
+
+    for led, preview_color in zip(editor.led_map.leds, preview):
+        assert preview_color == firmware_colors[led.firmware_index]
+
+
+def test_random_led_keyframe_delete_and_undo_round_trip():
+    editor = make_editor()
+    editor._action("random_led_editor")
+    editor.current_ms = 600
+    editor._action("random_led_keyframe")
+    effect_id = editor._active_random_led_effect().id
+
+    editor._delete_selected_keyframes()
+    assert editor._active_random_led_effect().keyframes == {}
+
+    editor._undo()
+    restored = editor._find_keyframe_target(effect_id)
+    assert restored.keyframes["enabled"][0].time_ms == 600
+
+
+def test_inactive_layer_keyframes_remain_available_for_timeline_drawing():
+    inactive_shape = Shape("ellipse", "inactive")
+    inactive_shape.add_keyframe("opacity", 250, 0.0)
+    active_shape = Shape("rectangle", "active")
+    active_shape.add_keyframe("x", 500, 0.7)
+    editor = make_editor()
+    editor.project.layers = [
+        Layer("inactive layer", shapes=[inactive_shape]),
+        Layer("active layer", shapes=[active_shape]),
+    ]
+    editor.active_layer = 1
+    editor.selected = active_shape
+
+    assert editor._inactive_layer_keyframe_times(editor.project.layers[0], active_shape) == {250}
+    editor.draw()

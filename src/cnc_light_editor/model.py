@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
+import math
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,40 @@ class Keyframe:
 
 
 @dataclass
+class GradientStop:
+    position: float
+    color: Color
+    id: str = field(default_factory=lambda: uuid4().hex[:8])
+
+
+@dataclass
+class RandomLedEffect:
+    name: str = "Random LED"
+    enabled: bool = True
+    seed: int = 1
+    life_ms: int = 250
+    born_speed: float = 8.0
+    particle_count: int = 8
+    color: Color = (255, 230, 80)
+    id: str = field(default_factory=lambda: uuid4().hex[:10])
+    keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
+
+    def add_keyframe(self, prop: str, time_ms: int, value: Any) -> None:
+        frames = self.keyframes.setdefault(prop, [])
+        frames[:] = [frame for frame in frames if frame.time_ms != time_ms]
+        frames.append(Keyframe(int(time_ms), value))
+        frames.sort(key=lambda frame: frame.time_ms)
+
+    def value_at(self, prop: str, time_ms: int) -> Any:
+        value = getattr(self, prop)
+        for frame in self.keyframes.get(prop, []):
+            if frame.time_ms > time_ms:
+                break
+            value = frame.value
+        return value
+
+
+@dataclass
 class Shape:
     kind: str
     name: str
@@ -29,6 +64,9 @@ class Shape:
     opacity: float = 1.0
     fill_mode: str = "fill"
     stroke_width: float = 0.012
+    gradient_type: str = "solid"
+    gradient_angle: float = 0.0
+    gradient_stops: list[GradientStop] = field(default_factory=list)
     visible: bool = True
     id: str = field(default_factory=lambda: uuid4().hex[:10])
     keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
@@ -51,7 +89,7 @@ class Shape:
                 after = frame
                 break
             before = frame
-        if after is None or prop in {"visible", "fill_mode"}:
+        if after is None or prop in {"visible", "fill_mode", "gradient_type"}:
             return before.value
         span = after.time_ms - before.time_ms
         amount = 0.0 if span == 0 else (time_ms - before.time_ms) / span
@@ -59,10 +97,12 @@ class Shape:
         return _lerp(before.value, after.value, amount)
 
     def state_at(self, time_ms: int) -> dict[str, Any]:
-        return {prop: self.value_at(prop, time_ms) for prop in (
+        state = {prop: self.value_at(prop, time_ms) for prop in (
             "x", "y", "width", "height", "rotation", "color", "opacity",
-            "fill_mode", "stroke_width", "visible",
+            "fill_mode", "stroke_width", "gradient_type", "gradient_angle", "visible",
         )}
+        state["gradient_stops"] = self.gradient_stops
+        return state
 
 
 @dataclass
@@ -70,6 +110,7 @@ class Layer:
     name: str
     visible: bool = True
     shapes: list[Shape] = field(default_factory=list)
+    effects: list[RandomLedEffect] = field(default_factory=list)
     id: str = field(default_factory=lambda: uuid4().hex[:10])
 
 
@@ -77,10 +118,44 @@ class Layer:
 class Project:
     name: str = "Untitled effect"
     duration_ms: int = 5000
-    fps: int = 30
+    fps: int = 20
     width: int = 3043
     height: int = 6305
     layers: list[Layer] = field(default_factory=lambda: [Layer("Layer 1")])
+    effect_id: int = 1
+    frame_ms: int | None = None
+    loops: int = 1
+    loop_frames: int = 0
+
+    def __post_init__(self) -> None:
+        # ``fps`` is kept in the file format so projects saved by early builds
+        # still load. V4 firmware timing is canonically represented by the
+        # integer ``frame_ms`` value.
+        if self.frame_ms is None:
+            self.frame_ms = max(1, round(1000 / max(1, self.fps)))
+
+    @property
+    def actual_fps(self) -> float:
+        return 1000.0 / max(1, self.frame_ms or 1)
+
+    @property
+    def stored_frame_count(self) -> int:
+        return max(1, math.ceil(self.duration_ms / max(1, self.frame_ms or 1)))
+
+    @property
+    def normalized_loop_frames(self) -> int:
+        frames = self.stored_frame_count
+        return frames if self.loop_frames == 0 else min(frames, max(1, self.loop_frames))
+
+    @property
+    def flash_bytes(self) -> int:
+        return self.stored_frame_count * 68 * 3
+
+    @property
+    def firmware_playback_ms(self) -> int:
+        loop_frames = self.normalized_loop_frames
+        steps = loop_frames * max(1, self.loops) + self.stored_frame_count - loop_frames
+        return steps * max(1, self.frame_ms or 1)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -107,8 +182,21 @@ class Project:
                     frame.value = tuple(frame.value)
                 if "color" in shape_raw:
                     shape_raw["color"] = tuple(shape_raw["color"])
-                shapes.append(Shape(**shape_raw, keyframes=keyframes))
-            layers.append(Layer(**layer_raw, shapes=shapes))
+                gradient_stops = []
+                for stop_raw in shape_raw.pop("gradient_stops", []):
+                    stop_raw["color"] = tuple(stop_raw["color"])
+                    gradient_stops.append(GradientStop(**stop_raw))
+                shapes.append(Shape(**shape_raw, keyframes=keyframes, gradient_stops=gradient_stops))
+            effects: list[RandomLedEffect] = []
+            for effect_raw in layer_raw.pop("effects", []):
+                keyframes = {
+                    prop: [Keyframe(**frame) for frame in frames]
+                    for prop, frames in effect_raw.pop("keyframes", {}).items()
+                }
+                if "color" in effect_raw:
+                    effect_raw["color"] = tuple(effect_raw["color"])
+                effects.append(RandomLedEffect(**effect_raw, keyframes=keyframes))
+            layers.append(Layer(**layer_raw, shapes=shapes, effects=effects))
         return cls(**raw, layers=layers or [Layer("Layer 1")])
 
 

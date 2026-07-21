@@ -9,15 +9,15 @@ from uuid import uuid4
 
 import pygame
 
-from .engine import point_inside, render_leds
+from .engine import point_inside, render_leds, sample_gradient
 from .effect_importer import ImportedEffect, load_effect_data
 from .exporter import export_arduino_header
 from .ledmap import Led, LedMap
-from .model import Layer, Project, Shape
+from .model import GradientStop, Layer, Project, RandomLedEffect, Shape
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "projects" / "current.cnclight"
-EXPORT_FILE = ROOT / "exports" / "cnc_effect.h"
+EXPORT_FILE = ROOT / "exports" / "effect_data.h"
 PALETTE = [
     (255, 70, 40), (255, 155, 20), (255, 230, 50), (80, 220, 90),
     (30, 180, 255), (90, 90, 255), (210, 80, 255), (255, 255, 255),
@@ -58,6 +58,9 @@ class Editor:
         self.duration_editing = False
         self.stroke_input = "1.2"
         self.stroke_editing = False
+        self.gradient_editor_open = False
+        self.selected_gradient_stop_id: str | None = None
+        self.random_led_editor_open = False
         self.imported_effects: list[ImportedEffect] = []
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
@@ -170,6 +173,15 @@ class Editor:
             if self.stroke_editing:
                 self._handle_stroke_input(event)
                 return
+            if event.key == pygame.K_ESCAPE and self.gradient_editor_open:
+                self.gradient_editor_open = False
+                self.drag_mode = None
+                self.status = "Closed gradient editor"
+                return
+            if event.key == pygame.K_ESCAPE and self.random_led_editor_open:
+                self.random_led_editor_open = False
+                self.status = "Closed Random LED editor"
+                return
             if event.key == pygame.K_SPACE:
                 self.space_down = True
             self._handle_key(event)
@@ -228,6 +240,21 @@ class Editor:
                         self.drag_origin = event.pos
                         self.drag_shape_state = dict(self.selected.state_at(self.current_ms))
                         self._begin_change()
+                    elif action.startswith("gradient_stop:") and self.selected:
+                        self.selected_gradient_stop_id = action.split(":", 1)[1]
+                        self.drag_mode = "gradient_stop"
+                        self.drag_origin = event.pos
+                        self._begin_change()
+                    elif action == "gradient_bar" and self.selected:
+                        self._begin_change()
+                        self._add_gradient_stop_at(event.pos[0])
+                        self.drag_mode = "gradient_stop"
+                        self.drag_origin = event.pos
+                    elif action == "gradient_angle" and self.selected:
+                        self.drag_mode = "gradient_angle"
+                        self.drag_origin = event.pos
+                        self._begin_change()
+                        self._set_gradient_angle_from_x(event.pos[0])
                     else:
                         self._action(action)
                     return
@@ -333,6 +360,10 @@ class Editor:
                 self._move_selected_led(event.pos, canvas)
             elif self.drag_mode == "scrub":
                 self._scrub_property(event.pos[0])
+            elif self.drag_mode == "gradient_stop":
+                self._move_gradient_stop(event.pos[0])
+            elif self.drag_mode == "gradient_angle":
+                self._set_gradient_angle_from_x(event.pos[0])
             elif self.drag_mode in ("move", "resize_nw", "resize_ne", "resize_sw", "resize_se", "rotate"):
                 self._transform_selection(event.pos, canvas)
             return
@@ -427,8 +458,15 @@ class Editor:
 
     def _action(self, action: str) -> None:
         mutating = (
-            action.startswith(("add:", "color:", "fill_mode:", "toggle_layer:"))
-            or action in {"layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe"}
+            action.startswith(("add:", "color:", "fill_mode:", "gradient_type:", "toggle_layer:"))
+            or action in {
+                "layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
+                "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
+                "set_loop_end", "clear_loop_end", "gradient_add_stop", "gradient_delete_stop",
+                "random_led_toggle", "random_led_keyframe", "random_led_seed:-1", "random_led_seed:1",
+                "random_led_life:-50", "random_led_life:50", "random_led_birth:-1", "random_led_birth:1",
+                "random_led_count:-1", "random_led_count:1", "random_led_delete",
+            }
         )
         if mutating:
             self._begin_change()
@@ -446,6 +484,8 @@ class Editor:
             clone.name = f"{source.name} copy"
             for shape in clone.shapes:
                 shape.id = uuid4().hex[:10]
+            for effect in clone.effects:
+                effect.id = uuid4().hex[:10]
             self.project.layers.insert(self.active_layer + 1, clone)
             self.active_layer += 1
             self.selected = clone.shapes[selected_index] if selected_index is not None else None
@@ -483,7 +523,7 @@ class Editor:
             state = self.selected.state_at(self.current_ms)
             for prop in (
                 "x", "y", "width", "height", "rotation", "color", "opacity",
-                "fill_mode", "stroke_width", "visible",
+                "fill_mode", "stroke_width", "gradient_type", "gradient_angle", "visible",
             ):
                 self.selected.add_keyframe(prop, self.current_ms, state[prop])
             self.selected_keyframes = {
@@ -510,6 +550,123 @@ class Editor:
         elif action == "snap":
             self.snap = not self.snap
             self.status = f"Snapping {'on' if self.snap else 'off'}"
+        elif action == "gradient_editor" and self.selected:
+            if len(self.selected.gradient_stops) < 2:
+                self._begin_change()
+                base = tuple(self.selected.state_at(self.current_ms)["color"])
+                self.selected.gradient_stops = [
+                    GradientStop(0.0, base),
+                    GradientStop(1.0, tuple(min(255, channel + 100) for channel in base)),
+                ]
+                self._commit_change()
+            self.gradient_editor_open = True
+            self.random_led_editor_open = False
+            self.selected_gradient_stop_id = self.selected.gradient_stops[0].id
+            self.status = "Gradient editor — click the bar to add a color stop"
+        elif action == "gradient_back":
+            self.gradient_editor_open = False
+            self.drag_mode = None
+            self.status = "Gradient changes applied"
+        elif action == "random_led_editor":
+            effect = self._active_random_led_effect()
+            if effect is None:
+                self._begin_change()
+                effect = RandomLedEffect()
+                self.project.layers[self.active_layer].effects.append(effect)
+                self._commit_change()
+            self.random_led_editor_open = True
+            self.gradient_editor_open = False
+            self.selected_keyframes.clear()
+            self.status = "Random LED — deterministic flashes independent from layer shapes"
+        elif action == "random_led_back":
+            self.random_led_editor_open = False
+            self.status = "Random LED changes applied"
+        elif action == "random_led_delete":
+            effect = self._active_random_led_effect()
+            if effect:
+                self.project.layers[self.active_layer].effects.remove(effect)
+                self.selected_keyframes = {
+                    key for key in self.selected_keyframes if key[0] != effect.id
+                }
+            self.random_led_editor_open = False
+            self.status = "Random LED effect removed from layer"
+        elif action == "random_led_toggle":
+            effect = self._active_random_led_effect()
+            if effect:
+                value = not bool(effect.value_at("enabled", self.current_ms))
+                if self.current_ms == 0 and not effect.keyframes.get("enabled"):
+                    effect.enabled = value
+                else:
+                    effect.add_keyframe("enabled", self.current_ms, value)
+                    self.selected_keyframes = {(effect.id, "enabled", self.current_ms)}
+                self.status = f"Random LED {'enabled' if value else 'disabled'} at {self.current_ms} ms"
+        elif action == "random_led_keyframe":
+            effect = self._active_random_led_effect()
+            if effect:
+                value = bool(effect.value_at("enabled", self.current_ms))
+                effect.add_keyframe("enabled", self.current_ms, value)
+                self.selected_keyframes = {(effect.id, "enabled", self.current_ms)}
+                self.status = f"Random LED enabled keyframe at {self.current_ms} ms"
+        elif action.startswith("random_led_seed:"):
+            effect = self._active_random_led_effect()
+            if effect:
+                effect.seed = max(0, min(2147483647, effect.seed + int(action.split(":", 1)[1])))
+        elif action.startswith("random_led_life:"):
+            effect = self._active_random_led_effect()
+            if effect:
+                effect.life_ms = max(50, min(10000, effect.life_ms + int(action.split(":", 1)[1])))
+        elif action.startswith("random_led_birth:"):
+            effect = self._active_random_led_effect()
+            if effect:
+                effect.born_speed = round(max(0.5, min(100.0, effect.born_speed + float(action.split(":", 1)[1]))), 1)
+        elif action.startswith("random_led_count:"):
+            effect = self._active_random_led_effect()
+            if effect:
+                effect.particle_count = max(1, min(68, effect.particle_count + int(action.split(":", 1)[1])))
+        elif action.startswith("gradient_type:") and self.selected:
+            gradient_type = action.split(":", 1)[1]
+            self._set_animated("gradient_type", gradient_type)
+            self.status = f"Gradient fill: {gradient_type}"
+        elif action == "gradient_add_stop" and self.selected:
+            self._add_gradient_stop()
+        elif action == "gradient_delete_stop" and self.selected:
+            if len(self.selected.gradient_stops) <= 2:
+                self.status = "A gradient needs at least two color stops"
+            else:
+                self.selected.gradient_stops = [
+                    stop for stop in self.selected.gradient_stops
+                    if stop.id != self.selected_gradient_stop_id
+                ]
+                self.selected_gradient_stop_id = self.selected.gradient_stops[0].id
+                self.status = "Gradient stop deleted"
+        elif action.startswith("effect_id:"):
+            delta = int(action.split(":", 1)[1])
+            self.project.effect_id = max(1, min(255, self.project.effect_id + delta))
+            self.status = f"Firmware effect ID: {self.project.effect_id}"
+        elif action == "cycle_fps":
+            presets = (50, 40, 33)
+            current = int(self.project.frame_ms or 50)
+            self.project.frame_ms = presets[(presets.index(current) + 1) % len(presets)] if current in presets else 50
+            self.project.fps = round(self.project.actual_fps)
+            self.current_ms = self._snap_time_to_frame(self.current_ms)
+            self.status = f"frameMs {self.project.frame_ms} — actual {self.project.actual_fps:.2f} FPS"
+        elif action.startswith("loops:"):
+            delta = int(action.split(":", 1)[1])
+            self.project.loops = max(1, min(255, self.project.loops + delta))
+            self.status = f"Loop count: {self.project.loops}"
+        elif action == "set_loop_end":
+            boundary = min(
+                self.project.stored_frame_count,
+                max(1, math.floor(self.current_ms / max(1, self.project.frame_ms or 1)) + 1),
+            )
+            self.project.loop_frames = 0 if boundary >= self.project.stored_frame_count else boundary
+            self.status = (
+                "Loop uses the full effect"
+                if self.project.loop_frames == 0 else f"Loop ends after frame {self.project.loop_frames - 1}"
+            )
+        elif action == "clear_loop_end":
+            self.project.loop_frames = 0
+            self.status = "Loop uses the full effect — no separate outro"
         elif action == "edit_duration":
             if self._active_imported_effect():
                 self.status = "Imported effect length is defined by its firmware frames"
@@ -543,8 +700,11 @@ class Editor:
             if errors:
                 self.status = "Export blocked: " + "; ".join(errors)
             else:
-                export_arduino_header(self.project, self.led_map.export_slots(), EXPORT_FILE)
-                self.status = f"Exported in firmware order: {EXPORT_FILE.name}"
+                try:
+                    export_arduino_header(self.project, self.led_map.export_slots(), EXPORT_FILE)
+                    self.status = f"V4 export: {self.project.stored_frame_count} frames / {self.project.flash_bytes} bytes"
+                except (OSError, ValueError) as error:
+                    self.status = f"Export failed: {error}"
         elif action == "edit_led_id":
             self.led_name_editing = False
             self.led_name_input = self._current_led().name
@@ -588,8 +748,25 @@ class Editor:
                 self.led_map.mapping_status = "hardware_verified"
                 self.led_map.save(self.led_map_path)
                 self.status = "LED map marked as hardware verified"
-        elif action.startswith("color:") and self.selected:
+        elif action.startswith("color:") and (self.selected or self.random_led_editor_open):
             color = PALETTE[int(action.split(":")[1])]
+            if self.random_led_editor_open:
+                effect = self._active_random_led_effect()
+                if effect:
+                    effect.color = color
+                    self.status = f"Random LED color: RGB {color}"
+                if mutating:
+                    self._commit_change()
+                return
+            assert self.selected is not None
+            if self.gradient_editor_open and self.selected_gradient_stop_id:
+                stop = self._selected_gradient_stop()
+                if stop:
+                    stop.color = color
+                    self.status = f"Gradient stop color: RGB {color}"
+                if mutating:
+                    self._commit_change()
+                return
             selected_times = sorted({
                 time_ms for shape_id, _prop, time_ms in self.selected_keyframes
                 if shape_id == self.selected.id
@@ -779,6 +956,62 @@ class Editor:
         right_edge = self.screen.get_width() - INSPECTOR_WIDTH
         return pygame.Rect(right_edge - 174, 11, 68, 32)
 
+    def _gradient_bar_rect(self) -> pygame.Rect:
+        panel_x = self.screen.get_width() - INSPECTOR_WIDTH
+        return pygame.Rect(panel_x + 22, TOP_BAR + 220, INSPECTOR_WIDTH - 44, 28)
+
+    def _gradient_angle_rect(self) -> pygame.Rect:
+        panel_x = self.screen.get_width() - INSPECTOR_WIDTH
+        return pygame.Rect(panel_x + 22, TOP_BAR + 377, INSPECTOR_WIDTH - 44, 18)
+
+    def _selected_gradient_stop(self) -> GradientStop | None:
+        if not self.selected:
+            return None
+        return next(
+            (stop for stop in self.selected.gradient_stops if stop.id == self.selected_gradient_stop_id),
+            None,
+        )
+
+    def _add_gradient_stop(self) -> None:
+        if not self.selected:
+            return
+        ordered = sorted(self.selected.gradient_stops, key=lambda stop: stop.position)
+        if len(ordered) < 2:
+            position = 0.5
+        else:
+            before, after = max(zip(ordered, ordered[1:]), key=lambda pair: pair[1].position - pair[0].position)
+            position = (before.position + after.position) / 2
+        stop = GradientStop(position, sample_gradient(ordered, position))
+        self.selected.gradient_stops.append(stop)
+        self.selected_gradient_stop_id = stop.id
+        self.status = f"Added gradient stop at {position * 100:.1f}%"
+
+    def _add_gradient_stop_at(self, screen_x: int) -> None:
+        if not self.selected:
+            return
+        bar = self._gradient_bar_rect()
+        position = max(0.0, min(1.0, (screen_x - bar.x) / max(1, bar.width)))
+        stop = GradientStop(position, sample_gradient(self.selected.gradient_stops, position))
+        self.selected.gradient_stops.append(stop)
+        self.selected_gradient_stop_id = stop.id
+        self.status = f"Added gradient stop at {position * 100:.1f}%"
+
+    def _move_gradient_stop(self, screen_x: int) -> None:
+        stop = self._selected_gradient_stop()
+        if not stop:
+            return
+        bar = self._gradient_bar_rect()
+        stop.position = round(max(0.0, min(1.0, (screen_x - bar.x) / max(1, bar.width))), 4)
+        self.status = f"Gradient stop: {stop.position * 100:.1f}%"
+
+    def _set_gradient_angle_from_x(self, screen_x: int) -> None:
+        if not self.selected:
+            return
+        slider = self._gradient_angle_rect()
+        ratio = max(0.0, min(1.0, (screen_x - slider.x) / max(1, slider.width)))
+        self._set_animated("gradient_angle", round(ratio * 360.0, 1))
+        self.status = f"Gradient angle: {round(ratio * 360.0, 1):.1f}°"
+
     def _timeline_window(self) -> tuple[float, float]:
         visible_ms = self._playback_duration() / self.timeline_zoom
         self._clamp_timeline_scroll()
@@ -833,24 +1066,26 @@ class Editor:
         return max(0, min(self._playback_duration(), snapped))
 
     def _keyframe_keys_at(self, time_ms: int) -> set[tuple[str, str, int]]:
-        if not self.selected:
+        target = self._active_keyframe_target()
+        if not target:
             return set()
         return {
-            (self.selected.id, prop, time_ms)
-            for prop, frames in self.selected.keyframes.items()
+            (target.id, prop, time_ms)
+            for prop, frames in target.keyframes.items()
             if any(frame.time_ms == time_ms for frame in frames)
         }
 
     def _pick_keyframe(
         self, pos: tuple[int, int], timeline: pygame.Rect
     ) -> int | None:
-        if not self.selected or self._active_imported_effect():
+        target = self._active_keyframe_target()
+        if not target or self._active_imported_effect():
             return None
         row_y = self._selected_timeline_row_y(timeline)
         if row_y is None or abs(pos[1] - row_y) > 12:
             return None
         start, end = self._timeline_window()
-        times = {frame.time_ms for frames in self.selected.keyframes.values() for frame in frames}
+        times = {frame.time_ms for frames in target.keyframes.values() for frame in frames}
         for time_ms in times:
             if not start <= time_ms <= end:
                 continue
@@ -860,20 +1095,34 @@ class Editor:
         return None
 
     def _selected_timeline_row_y(self, timeline: pygame.Rect) -> int | None:
-        if not self.selected:
-            return None
-        layer_index = next(
-            (index for index, layer in enumerate(self.project.layers[:5]) if self.selected in layer.shapes),
-            None,
-        )
+        if self.random_led_editor_open and self._active_random_led_effect():
+            layer_index = self.active_layer if self.active_layer < 5 else None
+        elif self.selected:
+            layer_index = next(
+                (index for index, layer in enumerate(self.project.layers[:5]) if self.selected in layer.shapes),
+                None,
+            )
+        else:
+            layer_index = None
         if layer_index is None:
             return None
         return self._timeline_track(timeline).y + 15 + layer_index * 32
 
+    @staticmethod
+    def _inactive_layer_keyframe_times(layer: Layer, active_target) -> set[int]:
+        return {
+            frame.time_ms
+            for item in [*layer.shapes, *layer.effects]
+            if item is not active_target
+            for frames in item.keyframes.values()
+            for frame in frames
+        }
+
     def _keyframes_in_marquee(
         self, start_pos: tuple[int, int], end_pos: tuple[int, int], timeline: pygame.Rect
     ) -> set[tuple[str, str, int]]:
-        if not self.selected:
+        target = self._active_keyframe_target()
+        if not target:
             return set()
         row_y = self._selected_timeline_row_y(timeline)
         if row_y is None:
@@ -883,7 +1132,7 @@ class Editor:
         marquee = pygame.Rect(left, top, max(1, right - left), max(1, bottom - top))
         start, end = self._timeline_window()
         selected: set[tuple[str, str, int]] = set()
-        times = {frame.time_ms for frames in self.selected.keyframes.values() for frame in frames}
+        times = {frame.time_ms for frames in target.keyframes.values() for frame in frames}
         for time_ms in times:
             if not start <= time_ms <= end:
                 continue
@@ -923,7 +1172,8 @@ class Editor:
         self.keyframe_marquee_additive = False
 
     def _move_keyframe(self, screen_x: int, timeline: pygame.Rect) -> None:
-        if not self.selected or self.drag_key_time is None:
+        target = self._active_keyframe_target()
+        if not target or self.drag_key_time is None:
             return
         new_time = self._timeline_x_to_time(screen_x, timeline)
         start, end = self._timeline_window()
@@ -931,18 +1181,18 @@ class Editor:
             new_time = self._snap_time_to_frame(new_time)
         delta = new_time - self.drag_key_time
         keys = self.selected_keyframes or self._keyframe_keys_at(self.drag_key_time)
-        selected_times = [time_ms for shape_id, _prop, time_ms in keys if shape_id == self.selected.id]
+        selected_times = [time_ms for target_id, _prop, time_ms in keys if target_id == target.id]
         if selected_times:
             delta = max(-min(selected_times), min(self.project.duration_ms - max(selected_times), delta))
         updated: set[tuple[str, str, int]] = set()
-        for shape_id, prop, old_time in keys:
-            if shape_id != self.selected.id:
+        for target_id, prop, old_time in keys:
+            if target_id != target.id:
                 continue
-            for frame in self.selected.keyframes.get(prop, []):
+            for frame in target.keyframes.get(prop, []):
                 if frame.time_ms == old_time:
                     frame.time_ms = old_time + delta
-                    updated.add((shape_id, prop, frame.time_ms))
-            self.selected.keyframes.get(prop, []).sort(key=lambda frame: frame.time_ms)
+                    updated.add((target_id, prop, frame.time_ms))
+            target.keyframes.get(prop, []).sort(key=lambda frame: frame.time_ms)
         self.selected_keyframes = updated
         self.drag_key_time += delta
         self.current_ms = self.drag_key_time
@@ -951,18 +1201,15 @@ class Editor:
         if not self.selected_keyframes:
             return
         self._begin_change()
-        for shape_id, prop, time_ms in tuple(self.selected_keyframes):
-            shape = next(
-                (item for layer in self.project.layers for item in layer.shapes if item.id == shape_id),
-                None,
-            )
-            if not shape or prop not in shape.keyframes:
+        for target_id, prop, time_ms in tuple(self.selected_keyframes):
+            target = self._find_keyframe_target(target_id)
+            if not target or prop not in target.keyframes:
                 continue
-            shape.keyframes[prop] = [
-                frame for frame in shape.keyframes[prop] if frame.time_ms != time_ms
+            target.keyframes[prop] = [
+                frame for frame in target.keyframes[prop] if frame.time_ms != time_ms
             ]
-            if not shape.keyframes[prop]:
-                del shape.keyframes[prop]
+            if not target.keyframes[prop]:
+                del target.keyframes[prop]
         self.selected_keyframes.clear()
         self._commit_change()
         self.status = "Selected keyframe deleted"
@@ -972,14 +1219,11 @@ class Editor:
             self._delete_selected_keyframes()
             return
         self._begin_change()
-        for shape_id, prop, time_ms in self.selected_keyframes:
-            shape = next(
-                (item for layer in self.project.layers for item in layer.shapes if item.id == shape_id),
-                None,
-            )
-            if not shape:
+        for target_id, prop, time_ms in self.selected_keyframes:
+            target = self._find_keyframe_target(target_id)
+            if not target:
                 continue
-            for frame in shape.keyframes.get(prop, []):
+            for frame in target.keyframes.get(prop, []):
                 if frame.time_ms == time_ms:
                     frame.easing = action
         self._commit_change()
@@ -1069,6 +1313,24 @@ class Editor:
             return None
         return self.imported_effects[self.active_import_index]
 
+    def _active_random_led_effect(self) -> RandomLedEffect | None:
+        if not 0 <= self.active_layer < len(self.project.layers):
+            return None
+        effects = self.project.layers[self.active_layer].effects
+        return effects[0] if effects else None
+
+    def _active_keyframe_target(self) -> Shape | RandomLedEffect | None:
+        if self.random_led_editor_open:
+            return self._active_random_led_effect()
+        return self.selected
+
+    def _find_keyframe_target(self, target_id: str) -> Shape | RandomLedEffect | None:
+        for layer in self.project.layers:
+            for target in [*layer.shapes, *layer.effects]:
+                if target.id == target_id:
+                    return target
+        return None
+
     def _playback_duration(self) -> int:
         effect = self._active_imported_effect()
         return effect.duration_ms if effect else self.project.duration_ms
@@ -1111,6 +1373,8 @@ class Editor:
         self.current_ms = 0
         self.playing = False
         self.active_import_index = None
+        self.gradient_editor_open = False
+        self.random_led_editor_open = False
         self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
@@ -1610,7 +1874,14 @@ class Editor:
                 stroke_px = max(1, round(state.get("stroke_width", 0.012) * min(canvas.size)))
                 stroke_px = min(stroke_px, max(1, min(local.size) // 2))
                 draw_width = stroke_px if state.get("fill_mode", "fill") == "stroke" else 0
-                if shape.kind == "ellipse":
+                gradient = (
+                    draw_width == 0
+                    and state.get("gradient_type", "solid") in {"linear", "radial"}
+                    and len(state.get("gradient_stops", [])) >= 2
+                )
+                if gradient:
+                    self._draw_gradient_shape(surface, shape.kind, local, state)
+                elif shape.kind == "ellipse":
                     pygame.draw.ellipse(surface, color, local, draw_width)
                 elif shape.kind == "rectangle":
                     pygame.draw.rect(surface, color, local, draw_width, border_radius=3)
@@ -1626,6 +1897,60 @@ class Editor:
                 rotated = pygame.transform.rotate(surface, -state["rotation"])
                 rect = rotated.get_rect(center=(cx, cy))
                 self.screen.blit(rotated, rect)
+
+    def _draw_gradient_shape(self, surface: pygame.Surface, kind: str, local: pygame.Rect, state: dict) -> None:
+        mask = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        white = (255, 255, 255, 255)
+        if kind == "ellipse":
+            pygame.draw.ellipse(mask, white, local)
+        elif kind == "rectangle":
+            pygame.draw.rect(mask, white, local, border_radius=3)
+        elif kind == "triangle":
+            pygame.draw.polygon(mask, white, [
+                (surface.get_width() // 2, 3),
+                (surface.get_width() - 3, surface.get_height() - 3),
+                (3, surface.get_height() - 3),
+            ])
+        else:
+            pygame.draw.line(
+                mask, white, (4, surface.get_height() // 2),
+                (surface.get_width() - 4, surface.get_height() // 2), max(2, local.height),
+            )
+        gradient_fill = self._gradient_surface(
+            local.size, state["gradient_stops"], state["gradient_type"],
+            float(state.get("gradient_angle", 0.0)), int(220 * state["opacity"]),
+        )
+        gradient = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        gradient.blit(gradient_fill, local.topleft)
+        gradient.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        surface.blit(gradient, (0, 0))
+
+    @staticmethod
+    def _gradient_surface(
+        size: tuple[int, int], stops: list[GradientStop], gradient_type: str,
+        angle: float, alpha: int,
+    ) -> pygame.Surface:
+        width, height = size
+        if gradient_type == "radial":
+            result = pygame.Surface(size, pygame.SRCALPHA)
+            result.fill((*sample_gradient(stops, 1.0), alpha))
+            steps = max(32, min(160, max(width, height)))
+            for index in range(steps - 1, -1, -1):
+                amount = index / max(1, steps - 1)
+                rect = pygame.Rect(0, 0, max(1, round(width * amount)), max(1, round(height * amount)))
+                rect.center = (width // 2, height // 2)
+                pygame.draw.ellipse(result, (*sample_gradient(stops, amount), alpha), rect)
+            return result
+
+        side = max(2, math.ceil(math.hypot(width, height)))
+        strip = pygame.Surface((side, side), pygame.SRCALPHA)
+        for x in range(side):
+            amount = x / max(1, side - 1)
+            pygame.draw.line(strip, (*sample_gradient(stops, amount), alpha), (x, 0), (x, side))
+        rotated = pygame.transform.rotate(strip, -angle)
+        result = pygame.Surface(size, pygame.SRCALPHA)
+        result.blit(rotated, rotated.get_rect(center=(width // 2, height // 2)))
+        return result
 
     def _draw_selection(self, canvas: pygame.Rect) -> None:
         geometry = self._selection_geometry(canvas)
@@ -1659,9 +1984,17 @@ class Editor:
 
     def _preview_led_colors(self) -> list[tuple[int, int, int]]:
         effect = self._active_imported_effect()
-        if not effect:
-            return render_leds(self.project, self.led_points, self.current_ms)
-        firmware_colors = effect.colors_at(self.current_ms)
+        if effect:
+            firmware_colors = effect.colors_at(self.current_ms)
+        else:
+            slots = self.led_map.export_slots()
+            active_colors = iter(render_leds(
+                self.project, [point for point in slots if point is not None], self.current_ms,
+            ))
+            firmware_colors = [
+                next(active_colors) if point is not None else (0, 0, 0)
+                for point in slots
+            ]
         return [
             firmware_colors[led.firmware_index]
             if 0 <= led.firmware_index < len(firmware_colors) else (0, 0, 0)
@@ -1670,7 +2003,7 @@ class Editor:
 
     def _timeline_frame_ms(self) -> float:
         imported = self._active_imported_effect()
-        return float(imported.frame_ms) if imported else 1000.0 / max(1, self.project.fps)
+        return float(imported.frame_ms) if imported else float(self.project.frame_ms or 50)
 
     def _timeline_uses_frame_ruler(self, timeline: pygame.Rect, visible_ms: float) -> bool:
         track = self._timeline_track(timeline)
@@ -1735,7 +2068,7 @@ class Editor:
             grid_text = (
                 f"FRAME GRID  •  {frame_ms:g} ms  •  {self.timeline_zoom:.1f}x"
                 if self._active_imported_effect() else
-                f"FRAME GRID  •  {self.project.fps} FPS  •  {self.timeline_zoom:.1f}x"
+                f"FRAME GRID  •  {self.project.actual_fps:.2f} FPS  •  {self.timeline_zoom:.1f}x"
             )
         else:
             grid_text = f"TIME GRID  •  {self.timeline_zoom:.1f}x"
@@ -1774,15 +2107,22 @@ class Editor:
             pygame.draw.rect(self.screen, (42, 54, 76), row)
             pygame.draw.rect(self.screen, ACCENT, (row.x, row.y, 3, row.height))
             label = self.small.render(
-                f"Firmware  /  {imported.name}  /  {len(imported.frames)} frames",
+                (
+                    f"ID {imported.effect_id}  /  {imported.name}  /  {len(imported.frames)} stored  /  "
+                    f"{imported.frame_ms} ms  /  ×{imported.loops}"
+                ),
                 True, (226, 230, 239),
             )
             self.screen.blit(label, (rect.x + 13, row_y - 3))
-            for frame_index in range(len(imported.frames) + 1):
+            total_steps = imported.duration_ms // imported.frame_ms
+            outro_start = imported.normalized_loop_frames * max(1, imported.loops)
+            for frame_index in range(total_steps + 1):
                 frame_time = frame_index * imported.frame_ms
                 if start <= frame_time <= end:
                     x = round(self._time_to_timeline_x(frame_time, rect))
-                    pygame.draw.line(self.screen, (255, 184, 70), (x, row.y + 3), (x, row.bottom - 3), 1)
+                    color = (102, 216, 164) if frame_index == outro_start and outro_start < total_steps else (255, 184, 70)
+                    width = 2 if frame_index == outro_start and outro_start < total_steps else 1
+                    pygame.draw.line(self.screen, color, (x, row.y + 3), (x, row.bottom - 3), width)
             row_y += 32
         for index, layer in enumerate([] if imported else self.project.layers[:5]):
             active = index == self.active_layer
@@ -1791,7 +2131,11 @@ class Editor:
                 pygame.draw.rect(self.screen, (42, 54, 76), row)
                 pygame.draw.rect(self.screen, ACCENT, (row.x, row.y, 3, row.height))
             eye = "●" if layer.visible else "○"
-            shape_suffix = f"  /  {self.selected.name}" if self.selected in layer.shapes else ""
+            random_effect = self._active_random_led_effect() if self.random_led_editor_open and index == self.active_layer else None
+            shape_suffix = (
+                f"  /  FX: {random_effect.name}" if random_effect else
+                f"  /  {self.selected.name}" if self.selected in layer.shapes else ""
+            )
             label = self.small.render(
                 f"{eye}  {layer.name}{shape_suffix}",
                 True, (226, 230, 239) if active else (166, 172, 187),
@@ -1802,8 +2146,22 @@ class Editor:
                 f"select_layer:{index}", layer.name,
             ))
             pygame.draw.line(self.screen, (47, 51, 61), (track.x, row.bottom), (track.right, row.bottom))
-            if self.selected in layer.shapes:
-                times = {frame.time_ms for frames in self.selected.keyframes.values() for frame in frames}
+            target = random_effect or (self.selected if self.selected in layer.shapes else None)
+            inactive_times = self._inactive_layer_keyframe_times(layer, target)
+            for time_ms in inactive_times:
+                if not start <= time_ms <= end:
+                    continue
+                marker_x = round(self._time_to_timeline_x(time_ms, rect))
+                size = 4
+                pygame.draw.polygon(
+                    self.screen, (91, 112, 145),
+                    [
+                        (marker_x, row_y - size), (marker_x + size, row_y),
+                        (marker_x, row_y + size), (marker_x - size, row_y),
+                    ],
+                )
+            if target:
+                times = {frame.time_ms for frames in target.keyframes.values() for frame in frames}
                 for time_ms in times:
                     if not start <= time_ms <= end:
                         continue
@@ -1859,14 +2217,54 @@ class Editor:
         if self.calibration:
             self._draw_calibration_panel(panel, x, panel.y + 80)
             return
+        if self.random_led_editor_open:
+            if self._active_random_led_effect():
+                self._draw_random_led_panel(panel, x)
+                return
+            self.random_led_editor_open = False
+        if self.gradient_editor_open:
+            if self.selected and self.selected.state_at(self.current_ms).get("fill_mode") == "fill":
+                self._draw_gradient_panel(panel, x)
+                return
+            self.gradient_editor_open = False
 
-        y = panel.y + 72
+        y = panel.y + 76
+        imported = self._active_imported_effect()
+        self.screen.blit(self.font.render("Firmware V4", True, (218, 222, 232)), (x, y))
+        y += 27
+        if imported:
+            summary = f"ID {imported.effect_id}  •  {imported.frame_ms} ms  •  {imported.actual_fps:.2f} FPS  •  ×{imported.loops}"
+            self.screen.blit(self.small.render(summary, True, (118, 184, 255)), (x, y)); y += 22
+            loop_text = f"Loop {imported.normalized_loop_frames}/{len(imported.frames)}  •  {imported.flash_bytes} B flash"
+            self.screen.blit(self.small.render(loop_text, True, (154, 162, 180)), (x, y)); y += 31
+        else:
+            summary = f"ID {self.project.effect_id}  •  {self.project.frame_ms} ms  •  {self.project.actual_fps:.2f} FPS"
+            self.screen.blit(self.small.render(summary, True, (118, 184, 255)), (x, y)); y += 21
+            self._button(pygame.Rect(x, y, 61, 27), "effect_id:-1", "ID −", False)
+            self._button(pygame.Rect(x + 68, y, 61, 27), "effect_id:1", "ID +", False)
+            self._button(pygame.Rect(x + 136, y, 139, 27), "cycle_fps", "Cycle FPS", False)
+            y += 34
+            self._button(pygame.Rect(x, y, 61, 27), "loops:-1", "Loop −", False)
+            self._button(pygame.Rect(x + 68, y, 61, 27), "loops:1", "Loop +", False)
+            self._button(pygame.Rect(x + 136, y, 82, 27), "set_loop_end", "Set end", False)
+            self._button(pygame.Rect(x + 225, y, 50, 27), "clear_loop_end", "Full", False)
+            y += 32
+            loop_frames = self.project.normalized_loop_frames
+            stats = (
+                f"×{self.project.loops}  •  loop {loop_frames}/{self.project.stored_frame_count}  •  "
+                f"{self.project.flash_bytes} B  •  {self.project.firmware_playback_ms / 1000:.2f}s"
+            )
+            self.screen.blit(self.small.render(stats, True, (154, 162, 180)), (x, y)); y += 24
+
+        pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
+        y += 12
         self.screen.blit(self.font.render("Layers", True, (218, 222, 232)), (x, y))
+        self._button(pygame.Rect(panel.right - 150, y - 3, 34, 25), "random_led_editor", "FX", False)
         self._button(pygame.Rect(panel.right - 110, y - 3, 28, 25), "duplicate_layer", "D", False)
         self._button(pygame.Rect(panel.right - 76, y - 3, 28, 25), "delete_layer", "−", False)
         self._button(pygame.Rect(panel.right - 42, y - 3, 28, 25), "layer", "+", False)
-        y = panel.y + 94
-        for index, layer in enumerate(self.project.layers[:6]):
+        y += 24
+        for index, layer in enumerate(self.project.layers[:4]):
             row = pygame.Rect(x, y, panel.width - 28, 27)
             if index == self.active_layer:
                 pygame.draw.rect(self.screen, (47, 61, 85), row, border_radius=3)
@@ -1918,17 +2316,24 @@ class Editor:
                 state.get("fill_mode", "fill") == "stroke",
             )
             y += 37
-            stroke_field = pygame.Rect(x, y, 275, 30)
-            pygame.draw.rect(self.screen, (40, 44, 54), stroke_field, border_radius=4)
-            pygame.draw.rect(self.screen, (67, 72, 86), stroke_field, 1, border_radius=4)
-            self.screen.blit(self.small.render("Stroke width", True, (148, 155, 173)), (stroke_field.x + 8, stroke_field.y + 7))
-            stroke_percent = state.get("stroke_width", 0.012) * 100
-            stroke_value = self.stroke_input if self.stroke_editing else f"{stroke_percent:.1f}"
-            if self.stroke_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
-                stroke_value += "|"
-            stroke_text = self.small.render(f"{stroke_value} / 5.0", True, (231, 234, 242))
-            self.screen.blit(stroke_text, (stroke_field.right - stroke_text.get_width() - 8, stroke_field.y + 7))
-            self.buttons.append((stroke_field, "scrub:stroke_width", "Stroke width"))
+            if state.get("fill_mode", "fill") == "stroke":
+                stroke_field = pygame.Rect(x, y, 275, 30)
+                pygame.draw.rect(self.screen, (40, 44, 54), stroke_field, border_radius=4)
+                pygame.draw.rect(self.screen, (67, 72, 86), stroke_field, 1, border_radius=4)
+                self.screen.blit(self.small.render("Stroke width", True, (148, 155, 173)), (stroke_field.x + 8, stroke_field.y + 7))
+                stroke_percent = state.get("stroke_width", 0.012) * 100
+                stroke_value = self.stroke_input if self.stroke_editing else f"{stroke_percent:.1f}"
+                if self.stroke_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+                    stroke_value += "|"
+                stroke_text = self.small.render(f"{stroke_value} / 5.0", True, (231, 234, 242))
+                self.screen.blit(stroke_text, (stroke_field.right - stroke_text.get_width() - 8, stroke_field.y + 7))
+                self.buttons.append((stroke_field, "scrub:stroke_width", "Stroke width"))
+            else:
+                gradient_type = state.get("gradient_type", "solid").title()
+                self._button(
+                    pygame.Rect(x, y, 275, 30), "gradient_editor",
+                    f"Gradient fill…  {gradient_type}", gradient_type != "Solid",
+                )
             y += 42
             self.screen.blit(self.small.render("Color", True, (172, 178, 193)), (x, y))
             y += 24
@@ -1945,6 +2350,156 @@ class Editor:
             self.screen.blit(self.small.render("Select an object on the canvas.", True, (145, 152, 169)), (x, y))
             y += 28
             self.screen.blit(self.small.render("Drag a shape tool onto the playfield.", True, (116, 124, 142)), (x, y))
+
+        pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))
+        self.screen.blit(self.small.render(self.status[:42], True, (100, 216, 162)), (x, panel.bottom - 29))
+
+    def _draw_random_led_panel(self, panel: pygame.Rect, x: int) -> None:
+        effect = self._active_random_led_effect()
+        assert effect is not None
+        layer = self.project.layers[self.active_layer]
+        enabled = bool(effect.value_at("enabled", self.current_ms))
+
+        y = panel.y + 78
+        self.screen.blit(self.font.render("RANDOM LED / SPARKLE", True, (225, 229, 238)), (x, y))
+        self._button(pygame.Rect(panel.right - 82, y - 4, 68, 28), "random_led_back", "< Back", False)
+        y += 35
+        self.screen.blit(self.small.render(f"Layer: {layer.name}", True, (118, 184, 255)), (x, y)); y += 28
+        self.screen.blit(self.small.render("Directly flashes random firmware LEDs.", True, (154, 162, 180)), (x, y)); y += 20
+        self.screen.blit(self.small.render("Layer shapes do not mask this effect.", True, (154, 162, 180)), (x, y)); y += 31
+
+        self.screen.blit(self.small.render("Enabled", True, (172, 178, 193)), (x, y))
+        state_color = (96, 220, 155) if enabled else (255, 112, 102)
+        state = "ON" if enabled else "OFF"
+        self.screen.blit(self.font.render(state, True, state_color), (x + 72, y - 3))
+        self._button(pygame.Rect(x + 132, y - 6, 68, 30), "random_led_toggle", "Toggle", enabled)
+        self._button(pygame.Rect(x + 207, y - 6, 68, 30), "random_led_keyframe", "+ Key", False)
+        y += 42
+
+        def parameter_row(label: str, value: str, minus: str, plus: str) -> None:
+            nonlocal y
+            row = pygame.Rect(x, y, 275, 34)
+            pygame.draw.rect(self.screen, (39, 43, 53), row, border_radius=4)
+            pygame.draw.rect(self.screen, (67, 72, 86), row, 1, border_radius=4)
+            self.screen.blit(self.small.render(label, True, (151, 158, 176)), (row.x + 8, row.y + 9))
+            rendered = self.small.render(value, True, (235, 238, 245))
+            self.screen.blit(rendered, rendered.get_rect(center=(row.centerx + 35, row.centery)))
+            self._button(pygame.Rect(row.right - 62, row.y + 3, 27, 28), minus, "-", False)
+            self._button(pygame.Rect(row.right - 30, row.y + 3, 27, 28), plus, "+", False)
+            y += 42
+
+        parameter_row("Random seed", str(effect.seed), "random_led_seed:-1", "random_led_seed:1")
+        parameter_row("Life", f"{effect.life_ms} ms", "random_led_life:-50", "random_led_life:50")
+        parameter_row("Born speed", f"{effect.born_speed:g} / sec", "random_led_birth:-1", "random_led_birth:1")
+        parameter_row("Max active", str(effect.particle_count), "random_led_count:-1", "random_led_count:1")
+
+        y += 5
+        self.screen.blit(self.small.render("Flash color", True, (172, 178, 193)), (x, y)); y += 25
+        for index, color in enumerate(PALETTE):
+            rect = pygame.Rect(x + index * 34, y, 27, 27)
+            pygame.draw.rect(self.screen, color, rect, border_radius=4)
+            if effect.color == color:
+                pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
+            self.buttons.append((rect, f"color:{index}", "Random LED color"))
+
+        y += 48
+        key_count = len(effect.keyframes.get("enabled", []))
+        self.screen.blit(
+            self.small.render(f"Enabled keyframes: {key_count}  •  Seeded preview/export", True, (145, 153, 171)),
+            (x, y),
+        )
+        y += 34
+        self._button(pygame.Rect(x, y, 275, 30), "random_led_delete", "Remove Random LED effect", False)
+
+        pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))
+        self.screen.blit(self.small.render(self.status[:42], True, (100, 216, 162)), (x, panel.bottom - 29))
+
+    def _draw_gradient_panel(self, panel: pygame.Rect, x: int) -> None:
+        assert self.selected is not None
+        state = self.selected.state_at(self.current_ms)
+        if len(self.selected.gradient_stops) < 2:
+            return
+        if not self._selected_gradient_stop():
+            self.selected_gradient_stop_id = self.selected.gradient_stops[0].id
+        selected_stop = self._selected_gradient_stop()
+
+        y = panel.y + 78
+        self.screen.blit(self.font.render("GRADIENT FILL", True, (225, 229, 238)), (x, y))
+        self._button(pygame.Rect(panel.right - 82, y - 4, 68, 28), "gradient_back", "< Back", False)
+        y += 34
+        self.screen.blit(self.small.render(self.selected.name, True, (118, 184, 255)), (x, y))
+        y += 31
+        self.screen.blit(self.small.render("Type", True, (172, 178, 193)), (x, y)); y += 22
+        gradient_type = state.get("gradient_type", "solid")
+        for index, (value, label) in enumerate((("solid", "Solid"), ("linear", "Linear"), ("radial", "Radial"))):
+            self._button(
+                pygame.Rect(x + index * 93, y, 86, 30), f"gradient_type:{value}", label,
+                gradient_type == value,
+            )
+
+        bar = self._gradient_bar_rect()
+        self.screen.blit(self.small.render("Color stops", True, (172, 178, 193)), (x, bar.y - 25))
+        for pixel_x in range(bar.width):
+            amount = pixel_x / max(1, bar.width - 1)
+            pygame.draw.line(
+                self.screen, sample_gradient(self.selected.gradient_stops, amount),
+                (bar.x + pixel_x, bar.y), (bar.x + pixel_x, bar.bottom - 1),
+            )
+        pygame.draw.rect(self.screen, (220, 224, 234), bar, 1, border_radius=2)
+        self.buttons.append((bar, "gradient_bar", "Add gradient stop"))
+
+        for stop in sorted(self.selected.gradient_stops, key=lambda item: item.position):
+            stop_x = round(bar.x + stop.position * bar.width)
+            center_y = bar.bottom + 11
+            points = [(stop_x, bar.bottom + 2), (stop_x - 7, center_y), (stop_x, center_y + 8), (stop_x + 7, center_y)]
+            pygame.draw.polygon(self.screen, stop.color, points)
+            selected = stop.id == self.selected_gradient_stop_id
+            pygame.draw.polygon(self.screen, ACCENT if selected else (226, 230, 239), points, 2 if selected else 1)
+            handle = pygame.Rect(0, 0, 22, 28)
+            handle.center = (stop_x, center_y)
+            self.buttons.append((handle, f"gradient_stop:{stop.id}", "Gradient stop"))
+
+        info_y = bar.bottom + 34
+        if selected_stop:
+            info = f"Selected stop  {selected_stop.position * 100:5.1f}%   RGB {selected_stop.color}"
+            self.screen.blit(self.small.render(info, True, (214, 219, 230)), (x, info_y))
+        button_y = info_y + 27
+        self._button(pygame.Rect(x, button_y, 132, 30), "gradient_add_stop", "+ Add stop", False)
+        self._button(pygame.Rect(x + 143, button_y, 132, 30), "gradient_delete_stop", "− Delete stop", False)
+
+        angle = float(state.get("gradient_angle", 0.0)) % 360.0
+        angle_y = button_y + 49
+        angle_color = (172, 178, 193) if gradient_type == "linear" else (102, 108, 122)
+        self.screen.blit(self.small.render(f"Angle  {angle:.1f}°", True, angle_color), (x, angle_y))
+        slider = self._gradient_angle_rect()
+        pygame.draw.line(self.screen, (92, 101, 120), slider.midleft, slider.midright, 4)
+        handle_x = round(slider.x + angle / 360.0 * slider.width)
+        pygame.draw.circle(self.screen, ACCENT if gradient_type == "linear" else (75, 81, 96), (handle_x, slider.centery), 8)
+        if gradient_type == "linear":
+            self.buttons.append((slider.inflate(0, 18), "gradient_angle", "Gradient angle"))
+        else:
+            note = "Angle is available in Linear mode"
+            self.screen.blit(self.small.render(note, True, (105, 112, 129)), (x, slider.bottom + 8))
+
+        palette_y = slider.bottom + 44
+        self.screen.blit(self.small.render("Selected stop color", True, (172, 178, 193)), (x, palette_y))
+        palette_y += 25
+        for index, color in enumerate(PALETTE):
+            rect = pygame.Rect(x + index * 34, palette_y, 27, 27)
+            pygame.draw.rect(self.screen, color, rect, border_radius=4)
+            if selected_stop and selected_stop.color == color:
+                pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
+            self.buttons.append((rect, f"color:{index}", "Gradient stop color"))
+
+        tips_y = palette_y + 55
+        tips = [
+            "Click the color bar to add a stop.",
+            "Drag any stop freely along the bar.",
+            "Select a palette color for the active stop.",
+            "Esc closes this gradient editor.",
+        ]
+        for tip in tips:
+            self.screen.blit(self.small.render(tip, True, (148, 155, 173)), (x, tips_y)); tips_y += 21
 
         pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))
         self.screen.blit(self.small.render(self.status[:42], True, (100, 216, 162)), (x, panel.bottom - 29))
