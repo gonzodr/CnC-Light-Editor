@@ -291,6 +291,76 @@ def test_led_can_be_moved_added_and_deleted_in_calibration():
     assert editor.led_map.validate() == []
 
 
+def test_led_map_uses_select_then_move_and_escape_restores_position():
+    editor = make_editor()
+    editor.calibration = True
+    editor.led_move_ready_id = None
+    canvas, _, _ = editor.layout()
+    led = editor._current_led()
+    original = (led.x, led.y)
+    marker = editor._world_to_screen(editor.led_points[0], canvas)
+    click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": marker})
+    release = pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": marker})
+
+    editor.handle_event(click)
+    editor.handle_event(release)
+    assert editor.drag_mode is None
+    assert (led.x, led.y) == original
+
+    editor.handle_event(click)
+    editor.handle_event(release)
+    assert editor.drag_mode == "led_move"
+
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": canvas.center, "rel": (0, 0), "buttons": (0, 0, 0)},
+        )
+    )
+    assert (led.x, led.y) != original
+
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": pygame.K_ESCAPE, "mod": 0, "unicode": ""},
+        )
+    )
+    assert editor.drag_mode is None
+    assert (led.x, led.y) == original
+
+
+def test_led_move_is_confirmed_with_another_playfield_click():
+    editor = make_editor()
+    editor.calibration = True
+    canvas, _, _ = editor.layout()
+    led = editor._current_led()
+    marker = editor._world_to_screen(editor.led_points[0], canvas)
+    editor.led_move_ready_id = led.id
+
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": marker})
+    )
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": marker})
+    )
+    target = (canvas.centerx + 25, canvas.centery - 30)
+    editor.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": target, "rel": (0, 0), "buttons": (0, 0, 0)},
+        )
+    )
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": target})
+    )
+
+    expected_x = round((target[0] - canvas.x) / canvas.width * editor.led_map.width)
+    expected_y = round((target[1] - canvas.y) / canvas.height * editor.led_map.height)
+    assert editor.drag_mode is None
+    assert (led.x, led.y) == (expected_x, expected_y)
+    assert "placed" in editor.status
+
+
 def test_imported_effect_drives_led_preview_and_duration(tmp_path):
     editor = make_editor()
     values = [0] * EFFECT_LEDS

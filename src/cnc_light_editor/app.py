@@ -49,6 +49,8 @@ class Editor:
         self.led_id_editing = False
         self.led_name_input = ""
         self.led_name_editing = False
+        self.led_move_ready_id: int | None = None
+        self.led_move_origin: tuple[float, float] | None = None
         self.duration_input = "5.0"
         self.duration_editing = False
         self.imported_effects: list[ImportedEffect] = []
@@ -182,6 +184,13 @@ class Editor:
                 else:
                     self.context_menu_pos = None
                 return
+            if self.calibration and self.drag_mode == "led_move" and event.button == 1:
+                if canvas.collidepoint(event.pos):
+                    self._move_selected_led(event.pos, canvas)
+                    self._finish_led_move()
+                else:
+                    self.status = "Click the playfield to place the LED, or Esc to cancel"
+                return
             if event.button == 2 or (event.button == 1 and self.space_down):
                 self.drag_mode = "pan"
                 self.drag_origin = event.pos
@@ -234,10 +243,18 @@ class Editor:
             if viewport.collidepoint(event.pos):
                 point = self._screen_to_world(event.pos, canvas)
                 if self.calibration and canvas.collidepoint(event.pos):
-                    self._select_led_id(self._pick_led(point))
-                    self.drag_mode = "led_move"
-                    self._move_selected_led(event.pos, canvas)
-                    self.status = f"Moving LED position {self.selected_led_id}"
+                    picked_led_id = self._pick_led_at_screen(event.pos, canvas)
+                    if picked_led_id is None:
+                        self.status = "Click directly on a LED marker to select it"
+                        return
+                    if self.led_move_ready_id == picked_led_id and self.selected_led_id == picked_led_id:
+                        self._start_led_move()
+                    else:
+                        self._select_led_id(picked_led_id)
+                        self.led_move_ready_id = picked_led_id
+                        self.status = (
+                            f"Selected LED {self._current_led().firmware_index} — click it again to move"
+                        )
                     return
                 handle = self._hit_selection_handle(event.pos, canvas)
                 picked = self._pick(point) if canvas.collidepoint(event.pos) else None
@@ -261,6 +278,8 @@ class Editor:
 
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button in (1, 2):
+                if self.drag_mode == "led_move":
+                    return
                 if self.tool_drag:
                     if viewport.collidepoint(event.pos):
                         self._create_shape(self.tool_drag, self._screen_to_world(event.pos, canvas))
@@ -272,9 +291,6 @@ class Editor:
                     self.drag_layer_index = None
                 if not self.duration_editing:
                     self._commit_change()
-                if self.drag_mode == "led_move":
-                    self.led_map.mapping_status = "calibration_in_progress"
-                    self.status = f"LED {self._current_led().firmware_index} position updated — save the LED map"
                 self.drag_mode = None
                 self.scrub_prop = None
                 self.drag_key_time = None
@@ -329,7 +345,9 @@ class Editor:
             self._action("import_effect_data")
             return
         if self.calibration:
-            if event.key in (pygame.K_TAB, pygame.K_RIGHT):
+            if event.key == pygame.K_ESCAPE and self.drag_mode == "led_move":
+                self._cancel_led_move()
+            elif event.key in (pygame.K_TAB, pygame.K_RIGHT):
                 self._action("led_next")
             elif event.key == pygame.K_LEFT:
                 self._action("led_prev")
@@ -441,9 +459,12 @@ class Editor:
             if self.stencil:
                 self.calibration = False
         elif action == "calibration":
+            if self.calibration and self.drag_mode == "led_move":
+                self._cancel_led_move()
             self.calibration = not self.calibration
             if self.calibration:
                 self.stencil = False
+                self.led_move_ready_id = None
                 self._sync_led_fields()
             self.playing = False
             self.selected = None
@@ -974,6 +995,30 @@ class Editor:
         self.led_points = self.led_map.normalized_points()
         self.led_map.mapping_status = "calibration_in_progress"
 
+    def _start_led_move(self) -> None:
+        led = self._current_led()
+        self.led_move_origin = (led.x, led.y)
+        self.drag_mode = "led_move"
+        self.status = f"Moving LED {led.firmware_index} — click to place, Esc to cancel"
+
+    def _finish_led_move(self) -> None:
+        led = self._current_led()
+        self.drag_mode = None
+        self.led_move_origin = None
+        self.led_move_ready_id = led.id
+        self.led_map.mapping_status = "calibration_in_progress"
+        self.status = f"LED {led.firmware_index} placed — save the LED map"
+
+    def _cancel_led_move(self) -> None:
+        led = self._current_led()
+        if self.led_move_origin is not None:
+            led.x, led.y = self.led_move_origin
+            self.led_points = self.led_map.normalized_points()
+        self.drag_mode = None
+        self.led_move_origin = None
+        self.led_move_ready_id = led.id
+        self.status = f"LED {led.firmware_index} movement cancelled"
+
     def _add_led(self) -> None:
         if len(self.led_map.leds) >= 68:
             self.status = "The firmware output is limited to 68 LED slots"
@@ -987,7 +1032,8 @@ class Editor:
         self.led_points = self.led_map.normalized_points()
         self.led_map.mapping_status = "calibration_in_progress"
         self._select_led_id(new_id)
-        self.status = f"Added LED {new_index} in the center — drag it into position"
+        self.led_move_ready_id = new_id
+        self.status = f"Added LED {new_index} in the center — click it to move"
 
     def _delete_led(self) -> None:
         if len(self.led_map.leds) <= 1:
@@ -1002,6 +1048,7 @@ class Editor:
         self.led_map.mapping_status = "calibration_in_progress"
         next_led = min(self.led_map.leds, key=lambda led: abs(led.id - removed.id))
         self._select_led_id(next_led.id)
+        self.led_move_ready_id = next_led.id
         self.status = f"Deleted LED {removed.firmware_index} — save the LED map"
 
     def _sync_led_fields(self) -> None:
@@ -1153,6 +1200,15 @@ class Editor:
             key=lambda item: (item[1][0] - point[0]) ** 2 + (item[1][1] - point[1]) ** 2,
         )
         return best[0].id
+
+    def _pick_led_at_screen(self, pos: tuple[int, int], canvas: pygame.Rect) -> int | None:
+        candidates = [
+            (led.id, pygame.Vector2(pos).distance_to(self._world_to_screen(point, canvas)))
+            for led, point in zip(self.led_map.leds, self.led_points)
+        ]
+        led_id, distance = min(candidates, key=lambda item: item[1])
+        hit_radius = max(12, min(22, canvas.width // 45))
+        return led_id if distance <= hit_radius else None
 
     def draw(self) -> None:
         self.screen.fill((20, 22, 28))

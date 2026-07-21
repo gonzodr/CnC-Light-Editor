@@ -8,10 +8,10 @@
    - Numerikusan szerkeszthető pozíció és sugár.
 
 2. **LED-map interakció javítása**
-   - Az első kattintás csak kijelöli a LED-et, nem változtatja meg a pozícióját.
-   - A már kijelölt LED-re történő második kattintás indítja a mozgatási módot.
-   - Mozgatás közben az `Esc` visszaállítja az eredeti pozíciót és kilép a mozgatási módból.
-   - LED-map módosítások saját undo/redo előzménnyel.
+   - [x] Az első kattintás csak kijelöli a LED-et, nem változtatja meg a pozícióját.
+   - [x] A már kijelölt LED-re történő második kattintás indítja a mozgatási módot.
+   - [x] Újabb kattintás rögzíti a pozíciót; az `Esc` visszaállítja az eredeti helyet.
+   - [ ] LED-map módosítások saját undo/redo előzménnyel.
 
 3. **Részletes property timeline és Graph Editor**
    - Külön Position, Scale, Rotation, Color, Opacity és Visibility sávok.

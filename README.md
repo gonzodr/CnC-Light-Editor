@@ -78,7 +78,7 @@ Az editor az opacityt az exportált RGB-csatornákba előre belekeveri. A jelenl
 1. Töltsd fel ideiglenesen a `firmware/playfield_led_calibration.ino` sketch-et az Arduino Megára.
 2. Nyisd meg a Serial Monitort `115200` baud sebességgel.
 3. Az `n` és `p` parancsokkal léptesd az egyetlen világító LED-et, vagy küldj egy `0..58` indexet.
-4. Az editorban válaszd a `LED map` módot, majd kattintással és húzással állítsd be a világító grafikai pozíciót.
+4. Az editorban válaszd a `LED map` módot. Az első kattintás kijelöli a LED-et, a kijelölt LED-re adott második kattintás elindítja a mozgatást. Mozgasd az egeret gombnyomás nélkül, majd kattints a rögzítéshez; az `Esc` visszaállítja az eredeti pozíciót.
 5. Az `Assigned LED ID` mezőbe írd be a fizikai lánc `0..58` indexét. Az ütköző indexek automatikusan felcserélődnek.
 6. Adj nevet a LED-nek. A `NULL` név kikapcsolja az adott firmware-slotot az előnézetben és az exportban.
    A névmező támogatja a `Ctrl+V` beillesztést is.
