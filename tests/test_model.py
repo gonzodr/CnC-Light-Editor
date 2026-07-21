@@ -1,0 +1,31 @@
+from cnc_light_editor.engine import render_leds
+from cnc_light_editor.model import Layer, Project, Shape
+
+
+def test_keyframes_interpolate_scale_and_color():
+    shape = Shape("ellipse", "pulse", width=0.1, color=(0, 0, 0))
+    shape.add_keyframe("width", 0, 0.1)
+    shape.add_keyframe("width", 1000, 0.5)
+    shape.add_keyframe("color", 0, (0, 0, 0))
+    shape.add_keyframe("color", 1000, (200, 100, 50))
+    assert shape.value_at("width", 500) == 0.3
+    assert shape.value_at("color", 500) == (100, 50, 25)
+
+
+def test_visibility_is_stepped():
+    shape = Shape("rectangle", "switch")
+    shape.add_keyframe("visible", 100, False)
+    shape.add_keyframe("visible", 200, True)
+    assert shape.value_at("visible", 150) is False
+
+
+def test_layer_composition_reaches_led():
+    shape = Shape("rectangle", "fill", width=1.0, height=1.0, color=(100, 50, 20))
+    project = Project(layers=[Layer("base", shapes=[shape])])
+    assert render_leds(project, [(0.5, 0.5)], 0) == [(100, 50, 20)]
+
+
+def test_hidden_layer_does_not_reach_led():
+    shape = Shape("ellipse", "fill", width=1.0, height=1.0, color=(255, 0, 0))
+    project = Project(layers=[Layer("hidden", visible=False, shapes=[shape])])
+    assert render_leds(project, [(0.5, 0.5)], 0) == [(0, 0, 0)]
