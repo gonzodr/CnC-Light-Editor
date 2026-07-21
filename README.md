@@ -101,4 +101,6 @@ Minden push és pull request ugyanezeket a teszteket, valamint a Pygame headless
 
 Közvetlen soros kapcsolat az editor és az Arduino diagnosztikai módja között, hogy a `Next` gomb egyben a hardveren is a következő LED-re váltson.
 
+A priorizált fejlesztési lista a [ROADMAP.md](ROADMAP.md) fájlban található.
+
 Az artwork és a DXF a gép saját gyártási anyaga. A repository jelenleg nem tartalmaz külön nyílt forrású licencet, ezért a GitHub alapértelmezett szerzői jogi szabályai érvényesek.
