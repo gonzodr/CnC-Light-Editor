@@ -58,6 +58,7 @@ cnc-light-editor
 - Több keyframe kijelölése: `Ctrl` + kattintás. A `Delete` csak a kijelölt keyframe-et törli.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő.
+- Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél a 60 ms-os firmware-frame-eket mutatja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
 - Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; duplikálás: `Ctrl+D`.
@@ -80,6 +81,7 @@ Az editor az opacityt az exportált RGB-csatornákba előre belekeveri. A jelenl
 4. Az editorban válaszd a `LED map` módot, majd kattintással és húzással állítsd be a világító grafikai pozíciót.
 5. Az `Assigned LED ID` mezőbe írd be a fizikai lánc `0..58` indexét. Az ütköző indexek automatikusan felcserélődnek.
 6. Adj nevet a LED-nek. A `NULL` név kikapcsolja az adott firmware-slotot az előnézetben és az exportban.
+   A névmező támogatja a `Ctrl+V` beillesztést is.
 7. A `Position −/+` a grafikai helyek, a `LED ID −/+` a fizikai lánc sorrendjében léptet. Az `Add LED` középre tesz egy új pontot, a `Delete LED` törli a kijelöltet és folytonosra zárja a firmware-indexeket. A `Save LED map` a pozíciókat, ID-ket és neveket is elmenti.
 8. Csak a teljes fizikai ellenőrzés után használd a `Mark hardware verified` gombot.
 9. A kalibráció után töltsd vissza a normál flipper firmware-t.

@@ -63,8 +63,8 @@ def test_keyframe_drag_snaps_to_frame_boundary():
     editor._move_keyframe(track.x + track.width // 2, timeline)
 
     moved = editor.selected.keyframes["x"][0].time_ms
-    frame_ms = round(1000 / editor.project.fps)
-    assert moved % frame_ms == 0
+    frame_ms = 1000 / editor.project.fps
+    assert abs(moved / frame_ms - round(moved / frame_ms)) < 0.02
 
 
 def test_selected_keyframe_delete_keeps_shape_and_undo_restores_diamond():
@@ -230,6 +230,34 @@ def test_led_name_null_is_stored_on_selected_position():
     )
     assert editor._current_led().name == "NULL"
     assert editor.led_map.export_slots()[editor._current_led().firmware_index] is None
+
+
+def test_led_name_accepts_ctrl_v_from_clipboard():
+    editor = make_editor()
+    editor._action("edit_led_name")
+    editor._clipboard_text = lambda: "Left sling\r\nwindow"
+
+    editor._handle_led_name_input(
+        pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": pygame.K_v, "mod": pygame.KMOD_CTRL, "unicode": "v"},
+        )
+    )
+
+    assert editor.led_name_input == "Left sling window"
+    assert "press Enter" in editor.status
+
+
+def test_timeline_switches_to_frame_ruler_when_zoomed_in():
+    editor = make_editor()
+    _, _, timeline = editor.layout()
+    editor.timeline_zoom = 1.0
+    _, end = editor._timeline_window()
+    assert editor._timeline_uses_frame_ruler(timeline, end) is False
+
+    editor.timeline_zoom = 20.0
+    start, end = editor._timeline_window()
+    assert editor._timeline_uses_frame_ruler(timeline, end - start) is True
 
 
 def test_filled_shape_draws_color_not_only_selection_frame():

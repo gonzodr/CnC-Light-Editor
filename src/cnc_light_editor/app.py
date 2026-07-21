@@ -791,7 +791,7 @@ class Editor:
         new_time = self._timeline_x_to_time(screen_x, timeline)
         if self.snap:
             frame_ms = 1000 / self.project.fps
-            new_time = round(new_time / frame_ms) * round(frame_ms)
+            new_time = round(round(new_time / frame_ms) * frame_ms)
         delta = new_time - self.drag_key_time
         keys = self.selected_keyframes or self._keyframe_keys_at(self.drag_key_time)
         updated: set[tuple[str, str, int]] = set()
@@ -1059,6 +1059,16 @@ class Editor:
             self.led_id_input += character
 
     def _handle_led_name_input(self, event: pygame.event.Event) -> None:
+        if event.key == pygame.K_v and getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL:
+            pasted = self._clipboard_text()
+            if pasted:
+                pasted = " ".join(pasted.replace("\x00", "").splitlines()).strip()
+                remaining = 28 - len(self.led_name_input)
+                self.led_name_input += pasted[:max(0, remaining)]
+                self.status = "Pasted LED name — press Enter to apply"
+            else:
+                self.status = "Clipboard contains no text"
+            return
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
             name = self.led_name_input.strip()
             if not name:
@@ -1083,6 +1093,26 @@ class Editor:
         character = getattr(event, "unicode", "")
         if character.isprintable() and len(self.led_name_input) < 28:
             self.led_name_input += character
+
+    @staticmethod
+    def _clipboard_text() -> str:
+        try:
+            if not pygame.scrap.get_init():
+                pygame.scrap.init()
+            raw = pygame.scrap.get(pygame.SCRAP_TEXT)
+        except pygame.error:
+            return ""
+        if not raw:
+            return ""
+        if isinstance(raw, str):
+            return raw
+        encodings = ("utf-16-le", "utf-8-sig", "mbcs") if raw.count(b"\x00") > 1 else ("utf-8-sig", "mbcs", "utf-16-le")
+        for encoding in encodings:
+            try:
+                return raw.decode(encoding).rstrip("\x00")
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return ""
 
     def _handle_duration_input(self, event: pygame.event.Event) -> None:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
@@ -1316,6 +1346,15 @@ class Editor:
             for led in self.led_map.leds
         ]
 
+    def _timeline_frame_ms(self) -> float:
+        imported = self._active_imported_effect()
+        return float(imported.frame_ms) if imported else 1000.0 / max(1, self.project.fps)
+
+    def _timeline_uses_frame_ruler(self, timeline: pygame.Rect, visible_ms: float) -> bool:
+        track = self._timeline_track(timeline)
+        pixels_per_frame = track.width * self._timeline_frame_ms() / max(1.0, visible_ms)
+        return self._active_imported_effect() is not None or pixels_per_frame >= 18
+
     def _draw_leds(self, canvas: pygame.Rect, stencil_back: bool = False) -> None:
         colors = self._preview_led_colors()
         radius = max(3, min(9, canvas.width // 90))
@@ -1363,21 +1402,40 @@ class Editor:
         pygame.draw.rect(self.screen, (22, 24, 30), track)
         pygame.draw.line(self.screen, (68, 73, 87), (track.x, track.y), (track.x, track.bottom))
 
+        start, end = self._timeline_window()
+        visible_ms = end - start
+        frame_ruler = self._timeline_uses_frame_ruler(rect, visible_ms)
+        frame_ms = self._timeline_frame_ms()
         self.screen.blit(self.font.render("TIMELINE", True, (220, 224, 234)), (rect.x + 12, rect.y + 9))
-        timecode = f"{self.current_ms / 1000:05.2f}s"
+        timecode = f"F{int(self.current_ms // frame_ms):03d}" if frame_ruler else f"{self.current_ms / 1000:05.2f}s"
         self.screen.blit(self.font.render(timecode, True, (108, 180, 255)), (rect.x + 102, rect.y + 9))
         zoom_label = self.small.render(f"Zoom {self.timeline_zoom:.1f}x", True, (142, 151, 171))
         self.screen.blit(zoom_label, (track.right - zoom_label.get_width(), rect.y + 10))
 
-        start, end = self._timeline_window()
-        visible_ms = end - start
-        tick_ms = 1000 if visible_ms > 4000 else 500 if visible_ms > 2000 else 200 if visible_ms > 1000 else 100
-        tick = math.ceil(start / tick_ms) * tick_ms
-        while tick <= end:
-            x = round(self._time_to_timeline_x(tick, rect))
-            pygame.draw.line(self.screen, (72, 77, 91), (x, rect.y + 23), (x, track.bottom), 1)
-            self.screen.blit(self.small.render(f"{tick / 1000:g}s", True, (145, 151, 166)), (x + 4, rect.y + 8))
-            tick += tick_ms
+        if frame_ruler:
+            pixels_per_frame = track.width * frame_ms / max(1.0, visible_ms)
+            minor_step = max(1, math.ceil(5 / max(0.1, pixels_per_frame)))
+            label_step = max(1, math.ceil(34 / max(0.1, pixels_per_frame)))
+            first_minor = math.ceil(start / frame_ms / minor_step) * minor_step
+            last_frame = math.floor(end / frame_ms)
+            for frame_index in range(first_minor, last_frame + 1, minor_step):
+                tick = frame_index * frame_ms
+                x = round(self._time_to_timeline_x(tick, rect))
+                pygame.draw.line(self.screen, (58, 63, 75), (x, rect.y + 27), (x, track.bottom), 1)
+            first_label = math.ceil(start / frame_ms / label_step) * label_step
+            for frame_index in range(first_label, last_frame + 1, label_step):
+                tick = frame_index * frame_ms
+                x = round(self._time_to_timeline_x(tick, rect))
+                pygame.draw.line(self.screen, (82, 88, 103), (x, rect.y + 22), (x, track.bottom), 1)
+                self.screen.blit(self.small.render(f"F{frame_index}", True, (145, 151, 166)), (x + 3, rect.y + 8))
+        else:
+            tick_ms = 1000 if visible_ms > 4000 else 500 if visible_ms > 2000 else 200 if visible_ms > 1000 else 100
+            tick = math.ceil(start / tick_ms) * tick_ms
+            while tick <= end:
+                x = round(self._time_to_timeline_x(tick, rect))
+                pygame.draw.line(self.screen, (72, 77, 91), (x, rect.y + 23), (x, track.bottom), 1)
+                self.screen.blit(self.small.render(f"{tick / 1000:g}s", True, (145, 151, 166)), (x + 4, rect.y + 8))
+                tick += tick_ms
 
         row_y = track.y + 15
         imported = self._active_imported_effect()
