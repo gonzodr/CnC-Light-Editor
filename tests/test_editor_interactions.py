@@ -260,6 +260,67 @@ def test_timeline_switches_to_frame_ruler_when_zoomed_in():
     assert editor._timeline_uses_frame_ruler(timeline, end - start) is True
 
 
+def test_playhead_and_keyframe_snap_to_frames_in_frame_ruler_mode():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.timeline_zoom = 20.0
+    editor.timeline_scroll_ms = 1900
+    editor.snap = False
+    _, _, timeline = editor.layout()
+    target_x = round(editor._time_to_timeline_x(2017, timeline))
+
+    editor._set_playhead(target_x, timeline)
+    frame_ms = 1000 / editor.project.fps
+    assert abs(editor.current_ms / frame_ms - round(editor.current_ms / frame_ms)) < 0.02
+
+    editor.selected.add_keyframe("x", 1900, 0.5)
+    editor.selected_keyframes = {(editor.selected.id, "x", 1900)}
+    editor.drag_key_time = 1900
+    editor._move_keyframe(target_x, timeline)
+    moved = editor.selected.keyframes["x"][0].time_ms
+    assert abs(moved / frame_ms - round(moved / frame_ms)) < 0.02
+
+
+def test_project_save_load_round_trip_and_dirty_state(tmp_path):
+    editor = make_editor()
+    editor.project.name = "Round trip"
+    editor._create_shape("rectangle", (0.3, 0.4))
+    editor.selected.color = (12, 34, 56)
+    path_without_suffix = tmp_path / "my-effect"
+
+    editor.save_project_file(path_without_suffix)
+    saved_path = path_without_suffix.with_suffix(".cnclight")
+    assert saved_path.exists()
+    assert editor.project_path == saved_path.resolve()
+    assert editor._project_is_dirty() is False
+
+    editor.selected.name = "Unsaved mutation"
+    assert editor._project_is_dirty() is True
+    editor.load_project_file(saved_path)
+
+    assert editor.project.name == "Round trip"
+    assert editor.project.layers[0].shapes[0].name == "Rectangle 1"
+    assert editor.project.layers[0].shapes[0].color == (12, 34, 56)
+    assert editor._project_is_dirty() is False
+
+
+def test_stroke_width_accepts_manual_values_up_to_five_percent():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.stroke_editing = True
+    editor.stroke_input = "5"
+
+    editor._handle_stroke_input(
+        pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": pygame.K_RETURN, "mod": 0, "unicode": "\r"},
+        )
+    )
+
+    assert editor.selected.state_at(editor.current_ms)["stroke_width"] == 0.05
+    assert editor.stroke_editing is False
+
+
 def test_filled_shape_draws_color_not_only_selection_frame():
     editor = make_editor()
     editor._create_shape("ellipse", (0.5, 0.5))
@@ -277,6 +338,9 @@ def test_led_can_be_moved_added_and_deleted_in_calibration():
     editor.calibration = True
     canvas, _, _ = editor.layout()
     original_count = len(editor.led_map.leds)
+    if original_count >= 68:
+        editor._delete_led()
+        original_count -= 1
     editor._move_selected_led(canvas.center, canvas)
     moved = editor._current_led()
     assert moved.x == round(editor.led_map.width / 2)

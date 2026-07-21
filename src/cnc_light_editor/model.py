@@ -86,8 +86,11 @@ class Project:
         return asdict(self)
 
     def save(self, path: str | Path) -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.tmp")
+        temporary.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        temporary.replace(target)
 
     @classmethod
     def load(cls, path: str | Path) -> "Project":
@@ -100,6 +103,8 @@ class Project:
                     prop: [Keyframe(**frame) for frame in frames]
                     for prop, frames in shape_raw.pop("keyframes", {}).items()
                 }
+                for frame in keyframes.get("color", []):
+                    frame.value = tuple(frame.value)
                 if "color" in shape_raw:
                     shape_raw["color"] = tuple(shape_raw["color"])
                 shapes.append(Shape(**shape_raw, keyframes=keyframes))

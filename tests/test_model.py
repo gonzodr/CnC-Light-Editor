@@ -63,3 +63,16 @@ def test_opacity_is_precomposited_into_rgb():
     )
     project = Project(layers=[Layer("opacity", shapes=[shape])])
     assert render_leds(project, [(0.5, 0.5)], 0) == [(100, 50, 20)]
+
+
+def test_atomic_project_round_trip_preserves_color_keyframe_tuple(tmp_path):
+    shape = Shape("ellipse", "color pulse")
+    shape.add_keyframe("color", 100, (10, 20, 30))
+    project = Project(layers=[Layer("color", shapes=[shape])])
+    path = tmp_path / "roundtrip.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.layers[0].shapes[0].keyframes["color"][0].value == (10, 20, 30)
+    assert not (tmp_path / ".roundtrip.cnclight.tmp").exists()

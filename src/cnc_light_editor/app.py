@@ -40,6 +40,9 @@ class Editor:
         self.small = pygame.font.Font(None, 18)
         self.title = pygame.font.Font(None, 30)
         self.project = Project("First playfield effect")
+        self.project_path: Path | None = None
+        self.saved_project_state: dict | None = None
+        self.last_window_caption = ""
         self.current_ms = 0
         self.playing = False
         self.stencil = False
@@ -53,6 +56,8 @@ class Editor:
         self.led_move_origin: tuple[float, float] | None = None
         self.duration_input = "5.0"
         self.duration_editing = False
+        self.stroke_input = "1.2"
+        self.stroke_editing = False
         self.imported_effects: list[ImportedEffect] = []
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
@@ -158,6 +163,9 @@ class Editor:
                 return
             if self.duration_editing:
                 self._handle_duration_input(event)
+                return
+            if self.stroke_editing:
+                self._handle_stroke_input(event)
                 return
             if event.key == pygame.K_SPACE:
                 self.space_down = True
@@ -289,8 +297,17 @@ class Editor:
                 if self.drag_layer_index is not None:
                     self._drop_layer(event.pos, panel)
                     self.drag_layer_index = None
+                open_stroke_input = (
+                    self.drag_mode == "scrub"
+                    and self.scrub_prop == "stroke_width"
+                    and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
+                )
                 if not self.duration_editing:
                     self._commit_change()
+                if open_stroke_input and self.selected:
+                    self.stroke_editing = True
+                    self.stroke_input = f"{self.selected.state_at(self.current_ms).get('stroke_width', 0.012) * 100:.1f}"
+                    self.status = "Type stroke width from 0.1 to 5.0, then press Enter"
                 self.drag_mode = None
                 self.scrub_prop = None
                 self.drag_key_time = None
@@ -362,7 +379,7 @@ class Editor:
         if event.key == pygame.K_SPACE:
             self.playing = not self.playing
         elif event.key == pygame.K_s and ctrl:
-            self._action("save")
+            self._action("save_as" if shift else "save")
         elif event.key == pygame.K_o and ctrl:
             self._action("load")
         elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
@@ -482,17 +499,11 @@ class Editor:
             self._begin_change()
             self.status = "Type duration in seconds (0.5–15), then press Enter"
         elif action == "save":
-            self.project.save(PROJECT_FILE)
-            self.status = f"Saved: {PROJECT_FILE.name}"
+            self._save_current_project()
+        elif action == "save_as":
+            self._choose_project_save()
         elif action == "load":
-            if PROJECT_FILE.exists():
-                self.project = Project.load(PROJECT_FILE)
-                self.selected = None
-                self.selected_keyframes.clear()
-                self.active_layer = 0
-                self.undo_stack.clear()
-                self.redo_stack.clear()
-                self.status = f"Loaded: {PROJECT_FILE.name}"
+            self._choose_project_load()
         elif action == "import_effect_data":
             self._choose_effect_data()
         elif action == "next_imported_effect":
@@ -779,7 +790,16 @@ class Editor:
         self.status = f"Duration: {self.duration_input}s"
 
     def _set_playhead(self, screen_x: int, timeline: pygame.Rect) -> None:
-        self.current_ms = self._timeline_x_to_time(screen_x, timeline)
+        time_ms = self._timeline_x_to_time(screen_x, timeline)
+        start, end = self._timeline_window()
+        if self._timeline_uses_frame_ruler(timeline, end - start):
+            time_ms = self._snap_time_to_frame(time_ms)
+        self.current_ms = time_ms
+
+    def _snap_time_to_frame(self, time_ms: int) -> int:
+        frame_ms = self._timeline_frame_ms()
+        snapped = round(round(time_ms / frame_ms) * frame_ms)
+        return max(0, min(self._playback_duration(), snapped))
 
     def _keyframe_keys_at(self, time_ms: int) -> set[tuple[str, str, int]]:
         if not self.selected:
@@ -810,9 +830,9 @@ class Editor:
         if not self.selected or self.drag_key_time is None:
             return
         new_time = self._timeline_x_to_time(screen_x, timeline)
-        if self.snap:
-            frame_ms = 1000 / self.project.fps
-            new_time = round(round(new_time / frame_ms) * frame_ms)
+        start, end = self._timeline_window()
+        if self.snap or self._timeline_uses_frame_ruler(timeline, end - start):
+            new_time = self._snap_time_to_frame(new_time)
         delta = new_time - self.drag_key_time
         keys = self.selected_keyframes or self._keyframe_keys_at(self.drag_key_time)
         updated: set[tuple[str, str, int]] = set()
@@ -912,7 +932,7 @@ class Editor:
         elif prop in {"width", "height"}:
             value = max(0.01, value)
         elif prop == "stroke_width":
-            value = max(0.001, min(0.1, value))
+            value = max(0.001, min(0.05, value))
         elif prop == "rotation":
             value %= 360
         if self.snap:
@@ -967,6 +987,110 @@ class Editor:
         self.calibration = False
         self.selected_keyframes.clear()
         self.status = f"Loaded {len(self.imported_effects)} firmware effects — {self.imported_effects[0].name}"
+
+    def _project_is_dirty(self) -> bool:
+        return self.saved_project_state is None or self.project.to_dict() != self.saved_project_state
+
+    def save_project_file(self, path: str | Path) -> None:
+        target = Path(path)
+        if target.suffix.lower() != ".cnclight":
+            target = target.with_suffix(".cnclight")
+        self.project.save(target)
+        self.project_path = target.resolve()
+        self.saved_project_state = deepcopy(self.project.to_dict())
+        self.status = f"Saved project: {target.name}"
+
+    def load_project_file(self, path: str | Path) -> None:
+        target = Path(path)
+        project = Project.load(target)
+        self.project = project
+        self.project_path = target.resolve()
+        self.saved_project_state = deepcopy(project.to_dict())
+        self.selected = None
+        self.selected_keyframes.clear()
+        self.active_layer = 0
+        self.current_ms = 0
+        self.playing = False
+        self.active_import_index = None
+        self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
+        self.timeline_zoom = 1.0
+        self.timeline_scroll_ms = 0.0
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.change_snapshot = None
+        self.status = f"Loaded project: {target.name}"
+
+    def _save_current_project(self) -> None:
+        if self.project_path is None:
+            self._choose_project_save()
+            return
+        try:
+            self.save_project_file(self.project_path)
+        except (OSError, TypeError, ValueError) as error:
+            self.status = f"Project save failed: {error}"
+
+    def _choose_project_save(self) -> None:
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            selected = filedialog.asksaveasfilename(
+                title="Save CnC Light project",
+                initialdir=str(PROJECT_FILE.parent),
+                initialfile=self.project_path.name if self.project_path else PROJECT_FILE.name,
+                defaultextension=".cnclight",
+                filetypes=[("CnC Light project", "*.cnclight"), ("All files", "*.*")],
+            )
+            if selected:
+                self.save_project_file(selected)
+            else:
+                self.status = "Project save cancelled"
+        except Exception as error:
+            self.status = f"Project save failed: {error}"
+        finally:
+            if root is not None:
+                root.destroy()
+
+    def _choose_project_load(self) -> None:
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog, messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            if self._project_is_dirty() and not messagebox.askyesno(
+                "Unsaved project",
+                "The current project has unsaved changes. Open another project anyway?",
+                parent=root,
+            ):
+                self.status = "Project load cancelled — current project kept"
+                return
+            selected = filedialog.askopenfilename(
+                title="Open CnC Light project",
+                initialdir=str(self.project_path.parent if self.project_path else PROJECT_FILE.parent),
+                filetypes=[("CnC Light project", "*.cnclight"), ("All files", "*.*")],
+            )
+            if selected:
+                self.load_project_file(selected)
+            else:
+                self.status = "Project load cancelled"
+        except Exception as error:
+            self.status = f"Project load failed: {error}"
+        finally:
+            if root is not None:
+                root.destroy()
 
     def _choose_effect_data(self) -> None:
         try:
@@ -1194,6 +1318,35 @@ class Editor:
                 return
             self.duration_input += character
 
+    def _handle_stroke_input(self, event: pygame.event.Event) -> None:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+            try:
+                percent = float(self.stroke_input.replace(",", "."))
+            except ValueError:
+                self.status = "Stroke width must be a number"
+                return
+            if not 0.1 <= percent <= 5.0:
+                self.status = "Stroke width must be between 0.1 and 5.0"
+                return
+            self._begin_change()
+            self._set_animated("stroke_width", percent / 100.0)
+            self._commit_change()
+            self.stroke_editing = False
+            self.status = f"Stroke width: {percent:.1f} / 5.0"
+            return
+        if event.key == pygame.K_ESCAPE:
+            self.stroke_editing = False
+            self.status = "Stroke width edit cancelled"
+            return
+        if event.key == pygame.K_BACKSPACE:
+            self.stroke_input = self.stroke_input[:-1]
+            return
+        character = getattr(event, "unicode", "")
+        if (character.isdigit() or character in ".,") and len(self.stroke_input) < 5:
+            if character in ".," and any(mark in self.stroke_input for mark in ".,"):
+                return
+            self.stroke_input += character
+
     def _pick_led(self, point: tuple[float, float]) -> int:
         best = min(
             zip(self.led_map.leds, self.led_points),
@@ -1211,6 +1364,7 @@ class Editor:
         return led_id if distance <= hit_radius else None
 
     def draw(self) -> None:
+        self._update_window_caption()
         self.screen.fill((20, 22, 28))
         canvas, panel, timeline = self.layout()
         viewport = pygame.Rect(TOOLBAR_WIDTH, TOP_BAR, panel.x - TOOLBAR_WIDTH, timeline.y - TOP_BAR)
@@ -1242,17 +1396,30 @@ class Editor:
             self.screen.blit(label, (mouse[0] + 22, mouse[1] - 8))
         self._draw_context_menu()
 
+    def _update_window_caption(self) -> None:
+        project_label = self.project_path.name if self.project_path else self.project.name
+        dirty = " *" if self._project_is_dirty() else ""
+        caption = f"CnC Light Editor — {project_label}{dirty}"
+        if caption != self.last_window_caption:
+            pygame.display.set_caption(caption)
+            self.last_window_caption = caption
+
     def _draw_toolbar(self) -> None:
         width = self.screen.get_width()
         pygame.draw.rect(self.screen, (38, 41, 50), (0, 0, width, TOP_BAR))
         pygame.draw.line(self.screen, (62, 66, 78), (0, TOP_BAR - 1), (width, TOP_BAR - 1))
-        self.screen.blit(self.font.render("CnC  LIGHT COMPOSER", True, (235, 238, 245)), (16, 17))
+        self.screen.blit(self.small.render("CnC  LIGHT COMPOSER", True, (235, 238, 245)), (16, 8))
+        project_label = self.project_path.name if self.project_path else "Untitled project"
+        project_label = project_label if len(project_label) <= 25 else project_label[:22] + "..."
+        if self._project_is_dirty():
+            project_label += "  •"
+        self.screen.blit(self.small.render(project_label, True, (108, 180, 255)), (16, 29))
         items = [
             ("play", "Pause" if self.playing else "Play"),
             ("keyframe", "+ Keyframe"),
             ("stencil", "Stencil"),
             ("calibration", "LED map"),
-            ("save", "Save"),
+            ("save", "Save*" if self._project_is_dirty() else "Save"),
             ("load", "Load"),
             ("export", "Export"),
         ]
@@ -1465,8 +1632,16 @@ class Editor:
         self.screen.blit(self.font.render("TIMELINE", True, (220, 224, 234)), (rect.x + 12, rect.y + 9))
         timecode = f"F{int(self.current_ms // frame_ms):03d}" if frame_ruler else f"{self.current_ms / 1000:05.2f}s"
         self.screen.blit(self.font.render(timecode, True, (108, 180, 255)), (rect.x + 102, rect.y + 9))
-        zoom_label = self.small.render(f"Zoom {self.timeline_zoom:.1f}x", True, (142, 151, 171))
-        self.screen.blit(zoom_label, (track.right - zoom_label.get_width(), rect.y + 10))
+        if frame_ruler:
+            grid_text = (
+                f"FRAME GRID  •  {frame_ms:g} ms  •  {self.timeline_zoom:.1f}x"
+                if self._active_imported_effect() else
+                f"FRAME GRID  •  {self.project.fps} FPS  •  {self.timeline_zoom:.1f}x"
+            )
+        else:
+            grid_text = f"TIME GRID  •  {self.timeline_zoom:.1f}x"
+        zoom_label = self.small.render(grid_text, True, (142, 151, 171))
+        zoom_rect = zoom_label.get_rect(bottomright=(track.right - 3, rect.bottom - 7)).inflate(10, 5)
 
         if frame_ruler:
             pixels_per_frame = track.width * frame_ms / max(1.0, visible_ms)
@@ -1560,6 +1735,8 @@ class Editor:
             "Wheel: zoom • Shift+wheel: scroll • right-click keyframe: easing/delete"
         )
         self.screen.blit(self.small.render(hint, True, (132, 139, 155)), (track.x, rect.bottom - 22))
+        pygame.draw.rect(self.screen, (29, 32, 40), zoom_rect, border_radius=3)
+        self.screen.blit(zoom_label, zoom_label.get_rect(center=zoom_rect.center))
 
     def _draw_panel(self, panel: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, PANEL, panel)
@@ -1634,10 +1811,14 @@ class Editor:
             stroke_field = pygame.Rect(x, y, 275, 30)
             pygame.draw.rect(self.screen, (40, 44, 54), stroke_field, border_radius=4)
             pygame.draw.rect(self.screen, (67, 72, 86), stroke_field, 1, border_radius=4)
-            self.screen.blit(self.small.render("Stroke thickness", True, (148, 155, 173)), (stroke_field.x + 8, stroke_field.y + 7))
-            stroke_text = self.small.render(f"{state.get('stroke_width', 0.012):.3f}", True, (231, 234, 242))
+            self.screen.blit(self.small.render("Stroke width", True, (148, 155, 173)), (stroke_field.x + 8, stroke_field.y + 7))
+            stroke_percent = state.get("stroke_width", 0.012) * 100
+            stroke_value = self.stroke_input if self.stroke_editing else f"{stroke_percent:.1f}"
+            if self.stroke_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+                stroke_value += "|"
+            stroke_text = self.small.render(f"{stroke_value} / 5.0", True, (231, 234, 242))
             self.screen.blit(stroke_text, (stroke_field.right - stroke_text.get_width() - 8, stroke_field.y + 7))
-            self.buttons.append((stroke_field, "scrub:stroke_width", "Stroke thickness"))
+            self.buttons.append((stroke_field, "scrub:stroke_width", "Stroke width"))
             y += 42
             self.screen.blit(self.small.render("Color", True, (172, 178, 193)), (x, y))
             y += 24

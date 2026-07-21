@@ -57,17 +57,17 @@ cnc-light-editor
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Több keyframe kijelölése: `Ctrl` + kattintás. A `Delete` csak a kijelölt keyframe-et törli.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
-- Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő.
+- Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
 - Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél a 60 ms-os firmware-frame-eket mutatja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
-- Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében.
+- Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében. A stroke mező vízszintesen húzható, kattintás után pedig kézzel is beírható `0,1–5,0` között.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; duplikálás: `Ctrl+D`.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.
 - Snap ki/be: `G`. Bekapcsolva az alakzat pozícióját és méretét 0,01-es normalizált rácsra, a forgatást 15°-ra, a keyframe idejét pedig FPS-képkockahatárra igazítja; kikapcsolva minden folyamatosan mozgatható.
-- Mentés/betöltés: `Ctrl+S`, `Ctrl+O`.
+- Projektmentés/betöltés: `Ctrl+S`, `Ctrl+O`; Save As: `Ctrl+Shift+S`. Az első mentés fájlnevet kér, a további mentések ugyanazt a `.cnclight` fájlt frissítik.
 - A jobb oldali színminták az aktuális playheadnél hoznak létre szín-keyframe-et.
 
-A toolbar `Arduino export` gombja az `exports/cnc_effect.h` fájlt generálja. A projekt alapértelmezetten a `projects/current.cnclight` fájlba ment.
+A toolbar `Export` gombja az `exports/cnc_effect.h` fájlt generálja. A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
 
 A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a felismert `EffectID` tömböket, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
