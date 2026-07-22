@@ -48,6 +48,14 @@ python -m pip install -e ".[dev]"
 cnc-light-editor
 ```
 
+Az alapértelmezett munkaterület natív `1280×1024`, ezért közvetlenül illeszkedik a flipper Raspberry Pi kijelzőjéhez. Teljes képernyős indítás:
+
+```bash
+cnc-light-editor --resolution 1280x1024 --fullscreen
+```
+
+Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a `CNC_LIGHT_EDITOR_RESOLUTION` környezeti változóval állítható. Ablakos módban a felület átméretezhető; a viewport, timeline és Inspector automatikusan újratördelődik, 1280×1024-en pedig a magasabb Inspector több layer-sort jelenít meg.
+
 ## Kezelés
 
 - Új alakzat: húzd a bal oldali Circle/Rect/Tri/Line eszközt a playfieldre.
@@ -56,7 +64,7 @@ cnc-light-editor
 - Forgatás: húzd a kijelölés fölötti kör alakú fogópontot.
 - Zoom: egérgörgő a viewport felett; pásztázás: középső egérgomb vagy `Space` + húzás.
 - Inspector: az X/Y/W/H/ROT/TURNS/OPACITY mezőket vízszintesen húzva finoman állíthatod, kattintás után pedig közvetlenül beírhatod az értéket. A `ROT` a körön belüli szög, a `TURNS ×N` a teljes fordulatok száma; például a `ROT` mezőbe írt `720` automatikusan `0.0° ×2` lesz, és két teljes fordulatként interpolálódik. A számbevitel támogatja a `Ctrl+A`, `Ctrl+V`, Enter és Esc műveleteket.
-- Layer-sorrend: húzd a layer sorát fel vagy le. A timeline layernevére kattintva valóban kijelölöd a layert; ilyenkor a `Delete`/`Backspace` a teljes kijelölt layert törli. Az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig szintén törli az aktív layert.
+- Layer-sorrend: húzd a layer sorát fel vagy le. Átnevezéshez nyomd meg a layer sorának `R` gombját, az `F2`-t, vagy kattints duplán a layer nevére az Inspectorban vagy a timeline-on; a névmező támogatja a `Ctrl+A` és `Ctrl+V` műveleteket. A timeline layernevére kattintva valóban kijelölöd a layert; ilyenkor a `Delete`/`Backspace` a teljes kijelölt layert törli. Az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig szintén törli az aktív layert.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.
 - A timeline layer-sorai előtt külön `ON/OFF` kapcsoló vezérli a layer láthatóságát. A `>` gomb lenyitja a layert az animált property-k külön dope sheet sávjaira. Ha a sorok nem férnek ki, a layernév-oszlop fölött görgetve függőlegesen lapozhatók; a jobb oldali időterület fölötti görgő továbbra is timeline-zoom.

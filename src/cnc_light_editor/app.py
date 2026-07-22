@@ -59,6 +59,7 @@ HELP_COLUMNS = (
     (
         ("LAYERS / CANVAS", (
             ("Ctrl + D", "Duplicate active layer"),
+            ("F2 / layer R", "Rename active layer"),
             ("C+ button", "Add the keyframeable Canvas layer"),
             ("Layer ON/OFF", "Toggle layer; Canvas creates a keyframe"),
             ("Enable / Disable", "Write an explicit Canvas state key"),
@@ -87,6 +88,8 @@ TOP_BAR = 54
 TOOLBAR_WIDTH = 68
 INSPECTOR_WIDTH = 318
 TIMELINE_HEIGHT = 218
+DEFAULT_WINDOW_SIZE = (1280, 1024)
+MIN_WINDOW_SIZE = (1024, 720)
 ACCENT = (77, 148, 255)
 PANEL = (31, 34, 42)
 PANEL_DARK = (24, 26, 33)
@@ -124,6 +127,7 @@ class Editor:
 
     def __init__(self, screen: pygame.Surface):
         self.screen = screen
+        self.window_flags = pygame.FULLSCREEN if pygame.display.is_fullscreen() else pygame.RESIZABLE
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 22)
         self.small = pygame.font.Font(None, 18)
@@ -157,6 +161,9 @@ class Editor:
         self.random_effect_input = ""
         self.random_effect_input_select_all = False
         self.random_effect_drag_start: float | int | None = None
+        self.layer_name_editing_id: str | None = None
+        self.layer_name_input = ""
+        self.layer_name_input_select_all = False
         self.imported_effects: list[ImportedEffect] = []
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
@@ -282,6 +289,14 @@ class Editor:
         return canvas, panel, timeline
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.VIDEORESIZE:
+            size = (
+                max(MIN_WINDOW_SIZE[0], int(event.w)),
+                max(MIN_WINDOW_SIZE[1], int(event.h)),
+            )
+            self.screen = pygame.display.set_mode(size, self.window_flags)
+            self.status = f"Workspace resized to {size[0]}×{size[1]}"
+            return
         canvas, panel, timeline = self.layout()
         viewport = pygame.Rect(TOOLBAR_WIDTH, TOP_BAR, panel.x - TOOLBAR_WIDTH, timeline.y - TOP_BAR)
 
@@ -315,6 +330,9 @@ class Editor:
                 return
             if self.stroke_editing:
                 self._handle_stroke_input(event)
+                return
+            if self.layer_name_editing_id:
+                self._handle_layer_name_input(event)
                 return
             if self.random_effect_editing:
                 self._handle_random_effect_input(event)
@@ -352,6 +370,8 @@ class Editor:
             if event.button == 1 and self.random_effect_editing:
                 self.random_effect_editing = None
                 self.random_effect_input_select_all = False
+            if event.button == 1 and self.layer_name_editing_id:
+                self._cancel_layer_rename("Layer rename cancelled")
             if event.button == 3:
                 self.context_menu_pos = None
                 if timeline.collidepoint(event.pos) and not self._active_imported_effect():
@@ -391,11 +411,17 @@ class Editor:
                         self.tool_drag = action.split(":", 1)[1]
                         self.drag_origin = event.pos
                     elif action.startswith("drag_layer:"):
-                        self.drag_layer_index = int(action.split(":")[1])
-                        self.active_layer = self.drag_layer_index
-                        self.timeline_selected_layer_id = None
-                        self.drag_origin = event.pos
-                        self._begin_change()
+                        layer_index = int(action.split(":")[1])
+                        if getattr(event, "clicks", 1) >= 2:
+                            self._start_layer_rename(layer_index)
+                        else:
+                            self.drag_layer_index = layer_index
+                            self.active_layer = self.drag_layer_index
+                            self.timeline_selected_layer_id = None
+                            self.drag_origin = event.pos
+                            self._begin_change()
+                    elif action.startswith("select_layer:") and getattr(event, "clicks", 1) >= 2:
+                        self._start_layer_rename(int(action.split(":", 1)[1]))
                     elif action == "duration_slider":
                         self.drag_mode = "duration"
                         self.drag_origin = event.pos
@@ -675,7 +701,9 @@ class Editor:
                 self._action("save_map")
             return
 
-        if event.key == pygame.K_SPACE:
+        if event.key == pygame.K_F2:
+            self._start_layer_rename(self.active_layer)
+        elif event.key == pygame.K_SPACE:
             self.playing = not self.playing
         elif event.key == pygame.K_s and ctrl:
             self._action("save_as" if shift else "save")
@@ -764,6 +792,8 @@ class Editor:
             self.timeline_selected_layer_id = None
             self.selected = None
             self._ensure_active_layer_visible()
+        elif action.startswith("rename_layer:"):
+            self._start_layer_rename(int(action.split(":", 1)[1]))
         elif action == "canvas_layer":
             existing = next(
                 (index for index, layer in enumerate(self.project.layers) if layer.is_canvas),
@@ -2257,6 +2287,79 @@ class Editor:
         self.timeline_selected_layer_id = None
         self.status = f"Moved layer to position {target + 1}"
 
+    def _start_layer_rename(self, layer_index: int) -> None:
+        if not 0 <= layer_index < len(self.project.layers):
+            return
+        self.active_layer = layer_index
+        layer = self.project.layers[layer_index]
+        self.layer_name_editing_id = layer.id
+        self.layer_name_input = layer.name
+        self.layer_name_input_select_all = True
+        self.status = "Type the layer name, then press Enter"
+
+    def _cancel_layer_rename(self, status: str = "Layer rename cancelled") -> None:
+        self.layer_name_editing_id = None
+        self.layer_name_input = ""
+        self.layer_name_input_select_all = False
+        self.status = status
+
+    def _handle_layer_name_input(self, event: pygame.event.Event) -> None:
+        layer = next(
+            (
+                item for item in self.project.layers
+                if item.id == self.layer_name_editing_id
+            ),
+            None,
+        )
+        if layer is None:
+            self._cancel_layer_rename()
+            return
+        ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
+        if ctrl and event.key == pygame.K_a:
+            self.layer_name_input_select_all = True
+            self.status = "Layer name selected"
+            return
+        if ctrl and event.key == pygame.K_v:
+            pasted = " ".join(
+                self._clipboard_text().replace("\x00", "").splitlines()
+            ).strip()
+            if not pasted:
+                self.status = "Clipboard contains no text"
+                return
+            self.layer_name_input = pasted[:40] if self.layer_name_input_select_all else (
+                self.layer_name_input + pasted
+            )[:40]
+            self.layer_name_input_select_all = False
+            self.status = "Pasted layer name — press Enter"
+            return
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+            name = self.layer_name_input.strip()
+            if not name:
+                self.status = "Layer name cannot be empty"
+                return
+            self._begin_change()
+            layer.name = name
+            self._commit_change()
+            self._cancel_layer_rename(f"Layer renamed: {name}")
+            return
+        if event.key == pygame.K_ESCAPE:
+            self._cancel_layer_rename()
+            return
+        if event.key == pygame.K_BACKSPACE:
+            if self.layer_name_input_select_all:
+                self.layer_name_input = ""
+                self.layer_name_input_select_all = False
+            else:
+                self.layer_name_input = self.layer_name_input[:-1]
+            return
+        character = getattr(event, "unicode", "")
+        if character.isprintable() and character not in "\r\n\t":
+            if self.layer_name_input_select_all:
+                self.layer_name_input = ""
+                self.layer_name_input_select_all = False
+            if len(self.layer_name_input) < 40:
+                self.layer_name_input += character
+
     def _scrub_property(self, screen_x: int) -> None:
         if not self.selected or not self.scrub_prop or not self.drag_shape_state:
             return
@@ -2514,6 +2617,9 @@ class Editor:
         self.random_effect_editing = None
         self.random_effect_input_select_all = False
         self.random_effect_drag_start = None
+        self.layer_name_editing_id = None
+        self.layer_name_input = ""
+        self.layer_name_input_select_all = False
         self.export_bank_open = False
         self.help_open = False
         self.property_editing = None
@@ -4153,7 +4259,8 @@ class Editor:
         self._button(pygame.Rect(panel.right - 76, y - 3, 28, 25), "delete_layer", "−", False)
         self._button(pygame.Rect(panel.right - 42, y - 3, 28, 25), "layer", "+", False)
         y += 24
-        for index, layer in enumerate(self.project.layers[:4]):
+        layer_capacity = max(2, 4 + (self.screen.get_height() - 900) // 31)
+        for index, layer in enumerate(self.project.layers[:layer_capacity]):
             row = pygame.Rect(x, y, panel.width - 28, 27)
             if index == self.active_layer:
                 pygame.draw.rect(self.screen, (47, 61, 85), row, border_radius=3)
@@ -4166,9 +4273,21 @@ class Editor:
             self._button(eye, f"toggle_layer:{index}", "●" if layer_on else "○", False)
             prefix = "C" if layer.is_canvas else "≡"
             name_color = (105, 218, 224) if layer.is_canvas else (228, 232, 241)
-            name = self.small.render(f"{prefix}   {layer.name}", True, name_color)
+            editing_name = self.layer_name_editing_id == layer.id
+            layer_name = self.layer_name_input if editing_name else layer.name
+            if editing_name and (pygame.time.get_ticks() // 500) % 2 == 0:
+                layer_name += "|"
+            layer_name = self._fit_text(layer_name, self.small, row.width - 91)
+            name = self.small.render(f"{prefix}   {layer_name}", True, name_color)
             self.screen.blit(name, (row.x + 38, row.y + 6))
-            self.buttons.append((pygame.Rect(row.x + 34, row.y, row.width - 34, row.height), f"drag_layer:{index}", layer.name))
+            self.buttons.append((
+                pygame.Rect(row.x + 34, row.y, row.width - 68, row.height),
+                f"drag_layer:{index}", layer.name,
+            ))
+            self._button(
+                pygame.Rect(row.right - 29, row.y + 3, 25, 21),
+                f"rename_layer:{index}", "R", editing_name,
+            )
             y += 31
 
         y += 10
@@ -4871,18 +4990,38 @@ class Editor:
         self.buttons.append((rect, action, label))
 
 
+def _parse_resolution(value: str) -> tuple[int, int]:
+    try:
+        width_text, height_text = value.lower().replace(" ", "").split("x", 1)
+        width, height = int(width_text), int(height_text)
+    except (AttributeError, ValueError) as error:
+        raise argparse.ArgumentTypeError("Resolution must use WIDTHxHEIGHT, for example 1280x1024") from error
+    if width < MIN_WINDOW_SIZE[0] or height < MIN_WINDOW_SIZE[1]:
+        raise argparse.ArgumentTypeError(
+            f"Resolution must be at least {MIN_WINDOW_SIZE[0]}x{MIN_WINDOW_SIZE[1]}"
+        )
+    return width, height
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CnC Pinball Light Editor")
     parser.add_argument("--smoke-test", action="store_true", help="Render three frames, then exit")
     parser.add_argument("--screenshot", type=Path, help="Write a screenshot during smoke test")
     parser.add_argument("--effect-data", type=Path, help="Load and preview an Arduino effect_data.h")
+    parser.add_argument(
+        "--resolution", type=_parse_resolution,
+        default=_parse_resolution(os.environ.get("CNC_LIGHT_EDITOR_RESOLUTION", "1280x1024")),
+        help="Initial window size as WIDTHxHEIGHT (default: 1280x1024)",
+    )
+    parser.add_argument("--fullscreen", action="store_true", help="Use a fullscreen Raspberry Pi display")
     args = parser.parse_args()
     if args.smoke_test:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     pygame.init()
     if WINDOW_ICON.is_file():
         pygame.display.set_icon(pygame.image.load(WINDOW_ICON))
-    screen = pygame.display.set_mode((1280, 900), pygame.RESIZABLE)
+    flags = pygame.FULLSCREEN if args.fullscreen else pygame.RESIZABLE
+    screen = pygame.display.set_mode(args.resolution, flags)
     pygame.display.set_caption("CnC Pinball — Light Effect Editor")
     try:
         editor = Editor(screen)

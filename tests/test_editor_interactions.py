@@ -4,7 +4,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
 
-from cnc_light_editor.app import Editor
+from cnc_light_editor.app import Editor, _parse_resolution
 from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect, parse_effect_data
 from cnc_light_editor.exporter import (
     export_effect_bank,
@@ -25,6 +25,23 @@ def make_editor() -> Editor:
     editor.undo_stack.clear()
     editor.redo_stack.clear()
     return editor
+
+
+def test_native_1280x1024_workspace_and_resolution_parser():
+    assert _parse_resolution("1280x1024") == (1280, 1024)
+    pygame.init()
+    screen = pygame.display.set_mode((1280, 1024), pygame.RESIZABLE)
+    editor = Editor(screen)
+    editor.project = Project(layers=[Layer(f"Layer {index + 1}") for index in range(8)])
+
+    canvas, panel, timeline = editor.layout()
+    assert editor.screen.get_size() == (1280, 1024)
+    assert canvas.top >= 54
+    assert timeline.bottom == 1024
+    assert panel.bottom == 1024
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert "rename_layer:7" in actions
 
 
 def test_canvas_layer_is_unique_undoable_and_owns_a_timeline_channel():
@@ -96,6 +113,43 @@ def test_shapes_and_random_led_effects_cannot_be_added_to_canvas_layer():
 
     assert canvas_layer.shapes == []
     assert canvas_layer.effects == []
+
+
+def test_layer_can_be_renamed_from_inspector_and_undone():
+    editor = make_editor()
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert "rename_layer:0" in actions
+
+    editor._action("rename_layer:0")
+    assert editor.layer_name_editing_id == editor.project.layers[0].id
+    editor.layer_name_input = "Main sparkle pass"
+    editor._handle_layer_name_input(pygame.event.Event(
+        pygame.KEYDOWN,
+        {"key": pygame.K_RETURN, "mod": 0, "unicode": "\r"},
+    ))
+
+    assert editor.project.layers[0].name == "Main sparkle pass"
+    assert editor.layer_name_editing_id is None
+    editor._undo()
+    assert editor.project.layers[0].name == "Layer 1"
+    editor._redo()
+    assert editor.project.layers[0].name == "Main sparkle pass"
+
+
+def test_f2_starts_layer_rename_and_escape_keeps_original_name():
+    editor = make_editor()
+
+    editor._handle_key(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_F2, "mod": 0, "unicode": ""},
+    ))
+    editor.layer_name_input = "Discarded name"
+    editor._handle_layer_name_input(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_ESCAPE, "mod": 0, "unicode": ""},
+    ))
+
+    assert editor.layer_name_editing_id is None
+    assert editor.project.layers[0].name == "Layer 1"
 
 
 def test_imported_overlay_sentinel_is_transparent_in_led_preview():
