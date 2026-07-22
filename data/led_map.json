@@ -1,67 +1,487 @@
 {
   "schema_version": 1,
-  "canvas": {"width": 3043, "height": 6305},
-  "mapping_status": "provisional_spatial_order",
-  "notes": "59 playfield-underlay positions only. Firmware indices must be calibrated against the physical chain.",
+  "canvas": {
+    "width": 3043,
+    "height": 6305
+  },
+  "mapping_status": "calibration_in_progress",
+  "notes": "68 firmware slots. NULL entries are reserved zero-output slots; the map remains in calibration.",
   "leds": [
-    {"id": 0, "firmware_index": 0, "x": 1914, "y": 334},
-    {"id": 1, "firmware_index": 1, "x": 1621, "y": 369},
-    {"id": 2, "firmware_index": 2, "x": 1328, "y": 394},
-    {"id": 3, "firmware_index": 3, "x": 2063, "y": 708},
-    {"id": 4, "firmware_index": 4, "x": 1763, "y": 734},
-    {"id": 5, "firmware_index": 5, "x": 1468, "y": 762},
-    {"id": 6, "firmware_index": 6, "x": 1171, "y": 791},
-    {"id": 7, "firmware_index": 7, "x": 2012, "y": 1276},
-    {"id": 8, "firmware_index": 8, "x": 1233, "y": 1338},
-    {"id": 9, "firmware_index": 9, "x": 2478, "y": 1541},
-    {"id": 10, "firmware_index": 10, "x": 1515, "y": 1794},
-    {"id": 11, "firmware_index": 11, "x": 1999, "y": 2166},
-    {"id": 12, "firmware_index": 12, "x": 2156, "y": 2250},
-    {"id": 13, "firmware_index": 13, "x": 602, "y": 2311},
-    {"id": 14, "firmware_index": 14, "x": 1255, "y": 2350},
-    {"id": 15, "firmware_index": 15, "x": 1412, "y": 2383},
-    {"id": 16, "firmware_index": 16, "x": 2107, "y": 2389},
-    {"id": 17, "firmware_index": 17, "x": 1566, "y": 2418},
-    {"id": 18, "firmware_index": 18, "x": 1723, "y": 2450},
-    {"id": 19, "firmware_index": 19, "x": 2018, "y": 2610},
-    {"id": 20, "firmware_index": 20, "x": 2281, "y": 2642},
-    {"id": 21, "firmware_index": 21, "x": 2549, "y": 2642},
-    {"id": 22, "firmware_index": 22, "x": 1955, "y": 2746},
-    {"id": 23, "firmware_index": 23, "x": 2218, "y": 2781},
-    {"id": 24, "firmware_index": 24, "x": 2481, "y": 2781},
-    {"id": 25, "firmware_index": 25, "x": 2055, "y": 3070},
-    {"id": 26, "firmware_index": 26, "x": 1854, "y": 3070},
-    {"id": 27, "firmware_index": 27, "x": 2255, "y": 3071},
-    {"id": 28, "firmware_index": 28, "x": 425, "y": 3079},
-    {"id": 29, "firmware_index": 29, "x": 1047, "y": 3094},
-    {"id": 30, "firmware_index": 30, "x": 873, "y": 3164},
-    {"id": 31, "firmware_index": 31, "x": 505, "y": 3225},
-    {"id": 32, "firmware_index": 32, "x": 2255, "y": 3271},
-    {"id": 33, "firmware_index": 33, "x": 1853, "y": 3271},
-    {"id": 34, "firmware_index": 34, "x": 2055, "y": 3271},
-    {"id": 35, "firmware_index": 35, "x": 918, "y": 3304},
-    {"id": 36, "firmware_index": 36, "x": 490, "y": 3496},
-    {"id": 37, "firmware_index": 37, "x": 2288, "y": 3504},
-    {"id": 38, "firmware_index": 38, "x": 2581, "y": 3592},
-    {"id": 39, "firmware_index": 39, "x": 448, "y": 3652},
-    {"id": 40, "firmware_index": 40, "x": 2287, "y": 3687},
-    {"id": 41, "firmware_index": 41, "x": 406, "y": 3806},
-    {"id": 42, "firmware_index": 42, "x": 2365, "y": 4218},
-    {"id": 43, "firmware_index": 43, "x": 400, "y": 4218},
-    {"id": 44, "firmware_index": 44, "x": 182, "y": 4342},
-    {"id": 45, "firmware_index": 45, "x": 2584, "y": 4343},
-    {"id": 46, "firmware_index": 46, "x": 2218, "y": 4450},
-    {"id": 47, "firmware_index": 47, "x": 546, "y": 4452},
-    {"id": 48, "firmware_index": 48, "x": 1264, "y": 4751},
-    {"id": 49, "firmware_index": 49, "x": 658, "y": 4752},
-    {"id": 50, "firmware_index": 50, "x": 2106, "y": 4752},
-    {"id": 51, "firmware_index": 51, "x": 1502, "y": 4753},
-    {"id": 52, "firmware_index": 52, "x": 1029, "y": 4781},
-    {"id": 53, "firmware_index": 53, "x": 1739, "y": 4783},
-    {"id": 54, "firmware_index": 54, "x": 2298, "y": 4986},
-    {"id": 55, "firmware_index": 55, "x": 466, "y": 4986},
-    {"id": 56, "firmware_index": 56, "x": 665, "y": 5131},
-    {"id": 57, "firmware_index": 57, "x": 2098, "y": 5134},
-    {"id": 58, "firmware_index": 58, "x": 1381, "y": 5415}
+    {
+      "id": 0,
+      "firmware_index": 53,
+      "x": 1908,
+      "y": 348,
+      "name": "LED_GATE3"
+    },
+    {
+      "id": 1,
+      "firmware_index": 55,
+      "x": 1613,
+      "y": 376,
+      "name": "LED_GATE2"
+    },
+    {
+      "id": 2,
+      "firmware_index": 57,
+      "x": 1325,
+      "y": 400,
+      "name": "LED_GATE1"
+    },
+    {
+      "id": 3,
+      "firmware_index": 52,
+      "x": 2060,
+      "y": 711,
+      "name": "LED_GATE3_AMBIENT"
+    },
+    {
+      "id": 4,
+      "firmware_index": 54,
+      "x": 1765,
+      "y": 739,
+      "name": "LED_GATE32_AMBIENT"
+    },
+    {
+      "id": 5,
+      "firmware_index": 56,
+      "x": 1472,
+      "y": 765,
+      "name": "LED_GATE21_AMBIENT"
+    },
+    {
+      "id": 6,
+      "firmware_index": 58,
+      "x": 1175,
+      "y": 793,
+      "name": "LED_GATE1_AMBIENT"
+    },
+    {
+      "id": 7,
+      "firmware_index": 66,
+      "x": 1995,
+      "y": 1281,
+      "name": "LED_POP3"
+    },
+    {
+      "id": 8,
+      "firmware_index": 65,
+      "x": 1233,
+      "y": 1338,
+      "name": "LED_POP2"
+    },
+    {
+      "id": 9,
+      "firmware_index": 51,
+      "x": 2475,
+      "y": 1523,
+      "name": "RIGHT RAMP AMB"
+    },
+    {
+      "id": 10,
+      "firmware_index": 64,
+      "x": 1515,
+      "y": 1794,
+      "name": "LED_POP1"
+    },
+    {
+      "id": 11,
+      "firmware_index": 33,
+      "x": 2002,
+      "y": 2165,
+      "name": "CHEECH IND"
+    },
+    {
+      "id": 12,
+      "firmware_index": 34,
+      "x": 2158,
+      "y": 2260,
+      "name": "RIGHT RAMP 1"
+    },
+    {
+      "id": 13,
+      "firmware_index": 23,
+      "x": 603,
+      "y": 2295,
+      "name": "LEFT RAMP AMB"
+    },
+    {
+      "id": 14,
+      "firmware_index": 29,
+      "x": 1257,
+      "y": 2350,
+      "name": "W"
+    },
+    {
+      "id": 15,
+      "firmware_index": 30,
+      "x": 1413,
+      "y": 2386,
+      "name": "E"
+    },
+    {
+      "id": 16,
+      "firmware_index": 35,
+      "x": 2109,
+      "y": 2376,
+      "name": "RIGHT RAMP 2"
+    },
+    {
+      "id": 17,
+      "firmware_index": 31,
+      "x": 1566,
+      "y": 2417,
+      "name": "E"
+    },
+    {
+      "id": 18,
+      "firmware_index": 32,
+      "x": 1724,
+      "y": 2453,
+      "name": "D"
+    },
+    {
+      "id": 19,
+      "firmware_index": 36,
+      "x": 2009,
+      "y": 2617,
+      "name": "RIGHT RAMP 3"
+    },
+    {
+      "id": 20,
+      "firmware_index": 43,
+      "x": 2286,
+      "y": 2645,
+      "name": "UFO 2"
+    },
+    {
+      "id": 21,
+      "firmware_index": 44,
+      "x": 2539,
+      "y": 2649,
+      "name": "RIGHT LOOP"
+    },
+    {
+      "id": 22,
+      "firmware_index": 37,
+      "x": 1964,
+      "y": 2741,
+      "name": "RIGHT RAMP 4"
+    },
+    {
+      "id": 23,
+      "firmware_index": 42,
+      "x": 2218,
+      "y": 2774,
+      "name": "UFO1"
+    },
+    {
+      "id": 24,
+      "firmware_index": 45,
+      "x": 2481,
+      "y": 2773,
+      "name": "RIGHT LOOP 2"
+    },
+    {
+      "id": 25,
+      "firmware_index": 41,
+      "x": 2062,
+      "y": 3068,
+      "name": "LED_CHEECH_CIGAR"
+    },
+    {
+      "id": 26,
+      "firmware_index": 38,
+      "x": 1851,
+      "y": 3072,
+      "name": "CHEECH WHEEL"
+    },
+    {
+      "id": 27,
+      "firmware_index": 46,
+      "x": 2255,
+      "y": 3072,
+      "name": "LED_MUF_DVR"
+    },
+    {
+      "id": 28,
+      "firmware_index": 22,
+      "x": 430,
+      "y": 3083,
+      "name": "LEFT LOOP 2"
+    },
+    {
+      "id": 29,
+      "firmware_index": 26,
+      "x": 1053,
+      "y": 3094,
+      "name": "LED CHONG IND"
+    },
+    {
+      "id": 30,
+      "firmware_index": 24,
+      "x": 874,
+      "y": 3168,
+      "name": "LEFT RAMP 1"
+    },
+    {
+      "id": 31,
+      "firmware_index": 21,
+      "x": 487,
+      "y": 3196,
+      "name": "LEFT LOOP 1"
+    },
+    {
+      "id": 32,
+      "firmware_index": 47,
+      "x": 2253,
+      "y": 3264,
+      "name": "LED_CHONG_KEY"
+    },
+    {
+      "id": 33,
+      "firmware_index": 39,
+      "x": 1859,
+      "y": 3269,
+      "name": "CHONG PIPE"
+    },
+    {
+      "id": 34,
+      "firmware_index": 40,
+      "x": 2058,
+      "y": 3267,
+      "name": "LED_CHONG_ROACH"
+    },
+    {
+      "id": 36,
+      "firmware_index": 18,
+      "x": 491,
+      "y": 3498,
+      "name": "C"
+    },
+    {
+      "id": 37,
+      "firmware_index": 48,
+      "x": 2282,
+      "y": 3500,
+      "name": "FISH"
+    },
+    {
+      "id": 38,
+      "firmware_index": 50,
+      "x": 2584,
+      "y": 3594,
+      "name": "FISH TANKK AMB"
+    },
+    {
+      "id": 39,
+      "firmware_index": 19,
+      "x": 452,
+      "y": 3656,
+      "name": "n"
+    },
+    {
+      "id": 40,
+      "firmware_index": 49,
+      "x": 2288,
+      "y": 3692,
+      "name": "TANK"
+    },
+    {
+      "id": 41,
+      "firmware_index": 20,
+      "x": 409,
+      "y": 3812,
+      "name": "C"
+    },
+    {
+      "id": 42,
+      "firmware_index": 2,
+      "x": 2365,
+      "y": 4218,
+      "name": "V"
+    },
+    {
+      "id": 43,
+      "firmware_index": 15,
+      "x": 400,
+      "y": 4218,
+      "name": "A"
+    },
+    {
+      "id": 44,
+      "firmware_index": 16,
+      "x": 182,
+      "y": 4342,
+      "name": "D"
+    },
+    {
+      "id": 45,
+      "firmware_index": 3,
+      "x": 2584,
+      "y": 4343,
+      "name": "E"
+    },
+    {
+      "id": 46,
+      "firmware_index": 1,
+      "x": 2219,
+      "y": 4451,
+      "name": "RIGHT SLINGSHOT AMB1"
+    },
+    {
+      "id": 47,
+      "firmware_index": 14,
+      "x": 551,
+      "y": 4455,
+      "name": "LEFT SLINGSHOT AMB '"
+    },
+    {
+      "id": 48,
+      "firmware_index": 9,
+      "x": 1264,
+      "y": 4751,
+      "name": "BONUS 4X"
+    },
+    {
+      "id": 49,
+      "firmware_index": 13,
+      "x": 658,
+      "y": 4752,
+      "name": "LEFT SLINGSHOT AMB 2"
+    },
+    {
+      "id": 50,
+      "firmware_index": 0,
+      "x": 2107,
+      "y": 4752,
+      "name": "RIGHT SLINGSHOT AMB 2"
+    },
+    {
+      "id": 51,
+      "firmware_index": 7,
+      "x": 1502,
+      "y": 4753,
+      "name": "BONUS 6X"
+    },
+    {
+      "id": 52,
+      "firmware_index": 10,
+      "x": 1029,
+      "y": 4781,
+      "name": "BONUS 2X"
+    },
+    {
+      "id": 53,
+      "firmware_index": 6,
+      "x": 1739,
+      "y": 4783,
+      "name": "BONUS 8X"
+    },
+    {
+      "id": 54,
+      "firmware_index": 4,
+      "x": 2298,
+      "y": 4991,
+      "name": "RIGHT DRAIN AMB 1"
+    },
+    {
+      "id": 55,
+      "firmware_index": 12,
+      "x": 469,
+      "y": 4991,
+      "name": "LEFT DRAIN LANE AMB 1"
+    },
+    {
+      "id": 56,
+      "firmware_index": 11,
+      "x": 666,
+      "y": 5130,
+      "name": "LEFT DRAIN LANE AMB 2"
+    },
+    {
+      "id": 57,
+      "firmware_index": 5,
+      "x": 2100,
+      "y": 5128,
+      "name": "RIGHT DRAIN AMB 2"
+    },
+    {
+      "id": 58,
+      "firmware_index": 8,
+      "x": 1383,
+      "y": 5412,
+      "name": "BALL SAVE"
+    },
+    {
+      "id": 59,
+      "firmware_index": 17,
+      "x": 165,
+      "y": 3587,
+      "name": "CnC Ambient"
+    },
+    {
+      "id": 60,
+      "firmware_index": 25,
+      "x": 905,
+      "y": 3285,
+      "name": "LEFT RAMP 2"
+    },
+    {
+      "id": 61,
+      "firmware_index": 27,
+      "x": 1069,
+      "y": 2384,
+      "name": "GET HIGH 1"
+    },
+    {
+      "id": 62,
+      "firmware_index": 28,
+      "x": 1073,
+      "y": 2247,
+      "name": "GET HIGH 2"
+    },
+    {
+      "id": 63,
+      "firmware_index": 59,
+      "x": 1256,
+      "y": 55,
+      "name": "NULL"
+    },
+    {
+      "id": 64,
+      "firmware_index": 60,
+      "x": 1426,
+      "y": 55,
+      "name": "NULL"
+    },
+    {
+      "id": 65,
+      "firmware_index": 61,
+      "x": 1612,
+      "y": 54,
+      "name": "NULL"
+    },
+    {
+      "id": 66,
+      "firmware_index": 62,
+      "x": 1800,
+      "y": 52,
+      "name": "NULL"
+    },
+    {
+      "id": 67,
+      "firmware_index": 63,
+      "x": 1962,
+      "y": 55,
+      "name": "NULL"
+    },
+    {
+      "id": 68,
+      "firmware_index": 67,
+      "x": 2625,
+      "y": 730,
+      "name": "LED_CAR_AMBIENT"
+    }
   ]
 }
