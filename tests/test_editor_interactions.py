@@ -12,7 +12,10 @@ from cnc_light_editor.model import Layer, Project, Shape
 
 def make_editor() -> Editor:
     pygame.init()
-    editor = Editor(pygame.display.set_mode((1280, 900)))
+    screen = pygame.display.get_surface()
+    if screen is None or screen.get_size() != (1280, 900):
+        screen = pygame.display.set_mode((1280, 900))
+    editor = Editor(screen)
     editor.project = Project("interaction test")
     editor.selected = None
     editor.undo_stack.clear()
@@ -576,6 +579,62 @@ def test_transform_field_accepts_numeric_clipboard_and_normalizes_rotation():
     ))
 
     assert editor.selected.rotation == 90.0
+    assert editor.selected.rotation_turns == 1.0
+
+
+def test_transform_field_records_two_complete_rotation_turns_and_undoes():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    editor.property_editing = "rotation"
+    editor.property_input = "720"
+    editor.property_input_select_all = False
+
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": "\r", "mod": 0},
+    ))
+
+    assert editor.selected.rotation == 0.0
+    assert editor.selected.rotation_turns == 2.0
+    assert editor.selected.state_at(0)["rotation_total"] == 720.0
+    editor._undo()
+    restored = editor.project.layers[0].shapes[0]
+    assert restored.rotation == 0.0
+    assert restored.rotation_turns == 0.0
+
+
+def test_inspector_exposes_rotation_turns_field():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+
+    editor.draw()
+
+    assert any(action == "scrub:rotation_turns" for _rect, action, _label in editor.buttons)
+
+
+def test_inspector_exposes_keyframeable_mask_fields_and_accepts_percent_input():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"scrub:feather", "scrub:mask_expansion"} <= actions
+
+    editor.property_editing = "feather"
+    editor.property_input = "5"
+    editor.property_input_select_all = False
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": "\r", "mod": 0},
+    ))
+
+    assert editor.selected.feather == 0.05
+
+
+def test_graph_range_keeps_negative_mask_expansion_visible():
+    shape = Shape("rectangle", "contracting mask", mask_expansion=-0.04)
+    shape.add_keyframe("mask_expansion", 1000, 0.04)
+
+    low, high = Editor._graph_value_range(shape, "mask_expansion")
+
+    assert low < 0.0 < high
 
 
 def test_transform_field_rejects_out_of_range_opacity():

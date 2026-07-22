@@ -14,6 +14,33 @@ def test_keyframes_interpolate_scale_and_color():
     assert shape.value_at("color", 500) == (100, 50, 25)
 
 
+def test_rotation_turns_preserve_full_revolutions_during_interpolation():
+    shape = Shape("rectangle", "spinner")
+    shape.add_keyframe("rotation", 0, 0.0)
+    shape.add_keyframe("rotation", 1000, 0.0)
+    shape.add_keyframe("rotation_turns", 0, 0.0)
+    shape.add_keyframe("rotation_turns", 1000, 2.0)
+
+    assert shape.state_at(250)["rotation_total"] == 180.0
+    assert shape.state_at(500)["rotation_total"] == 360.0
+    assert shape.state_at(1000)["rotation_total"] == 720.0
+
+
+def test_rotation_turns_round_trip_with_project(tmp_path):
+    shape = Shape("triangle", "spinner", rotation=15.0, rotation_turns=1.0)
+    shape.add_keyframe("rotation", 1000, 0.0)
+    shape.add_keyframe("rotation_turns", 1000, 2.0)
+    project = Project(layers=[Layer("rotation", shapes=[shape])])
+    path = tmp_path / "rotation.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+    loaded_shape = loaded.layers[0].shapes[0]
+
+    assert loaded_shape.rotation_turns == 1.0
+    assert loaded_shape.state_at(1000)["rotation_total"] == 720.0
+
+
 def test_visibility_is_stepped():
     shape = Shape("rectangle", "switch")
     shape.add_keyframe("visible", 100, False)
@@ -95,6 +122,49 @@ def test_opacity_is_precomposited_into_rgb():
     )
     project = Project(layers=[Layer("opacity", shapes=[shape])])
     assert render_leds(project, [(0.5, 0.5)], 0) == [(100, 50, 20)]
+
+
+def test_mask_expansion_changes_led_coverage_in_export_renderer():
+    expanded = Shape(
+        "rectangle", "expanded", width=0.2, height=0.2,
+        color=(200, 100, 40), mask_expansion=0.02,
+    )
+    contracted = Shape(
+        "rectangle", "contracted", width=0.2, height=0.2,
+        color=(200, 100, 40), mask_expansion=-0.02,
+    )
+
+    assert render_leds(Project(layers=[Layer("expanded", shapes=[expanded])]), [(0.61, 0.5)], 0) == [
+        (200, 100, 40),
+    ]
+    assert render_leds(Project(layers=[Layer("contracted", shapes=[contracted])]), [(0.59, 0.5)], 0) == [
+        (0, 0, 0),
+    ]
+
+
+def test_feather_produces_partial_led_brightness_at_mask_edge():
+    shape = Shape(
+        "rectangle", "soft", width=0.2, height=0.2,
+        color=(200, 100, 40), feather=0.04,
+    )
+    project = Project(layers=[Layer("soft", shapes=[shape])])
+
+    assert render_leds(project, [(0.6, 0.5)], 0) == [(100, 50, 20)]
+
+
+def test_feather_and_mask_expansion_are_keyframeable_and_persisted(tmp_path):
+    shape = Shape("ellipse", "soft")
+    shape.add_keyframe("feather", 0, 0.0)
+    shape.add_keyframe("feather", 1000, 0.04)
+    shape.add_keyframe("mask_expansion", 0, -0.02)
+    shape.add_keyframe("mask_expansion", 1000, 0.02)
+    path = tmp_path / "mask.cnclight"
+    Project(layers=[Layer("mask", shapes=[shape])]).save(path)
+
+    loaded = Project.load(path).layers[0].shapes[0]
+
+    assert loaded.state_at(500)["feather"] == 0.02
+    assert loaded.state_at(500)["mask_expansion"] == 0.0
 
 
 def test_atomic_project_round_trip_preserves_color_keyframe_tuple(tmp_path):

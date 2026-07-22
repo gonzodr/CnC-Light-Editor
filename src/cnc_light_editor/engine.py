@@ -8,31 +8,47 @@ from .model import Color, Project, Shape
 
 
 def point_inside(shape: Shape, state: dict, point: tuple[float, float]) -> bool:
+    return shape_coverage(shape, state, point) >= 0.5
+
+
+def shape_coverage(shape: Shape, state: dict, point: tuple[float, float]) -> float:
+    """Return the feathered mask coverage at a normalized playfield point."""
     x, y = _local_point(state, point)
     half_w = max(float(state["width"]) / 2, 0.0001)
     half_h = max(float(state["height"]) / 2, 0.0001)
     fill_mode = state.get("fill_mode", "fill")
     stroke = max(0.0005, float(state.get("stroke_width", 0.012)))
     if shape.kind == "ellipse":
-        outer = (x / half_w) ** 2 + (y / half_h) ** 2 <= 1
-        inner_w, inner_h = half_w - stroke, half_h - stroke
-        inner = inner_w > 0 and inner_h > 0 and (x / inner_w) ** 2 + (y / inner_h) ** 2 < 1
-        return outer and (fill_mode == "fill" or not inner)
-    if shape.kind == "rectangle":
-        outer = abs(x) <= half_w and abs(y) <= half_h
-        inner = abs(x) < half_w - stroke and abs(y) < half_h - stroke
-        return outer and (fill_mode == "fill" or not inner)
-    if shape.kind == "triangle":
-        outer = _in_triangle(x, y, 0.0, -half_h, half_w, half_h, -half_w, half_h)
-        inner_w, inner_h = half_w - stroke, half_h - stroke
-        inner = inner_w > 0 and inner_h > 0 and _in_triangle(
-            x, y, 0.0, -inner_h, inner_w, inner_h, -inner_w, inner_h
+        distance = (1.0 - sqrt((x / half_w) ** 2 + (y / half_h) ** 2)) * min(half_w, half_h)
+    elif shape.kind == "rectangle":
+        outside_x, outside_y = max(abs(x) - half_w, 0.0), max(abs(y) - half_h, 0.0)
+        if outside_x or outside_y:
+            distance = -sqrt(outside_x * outside_x + outside_y * outside_y)
+        else:
+            distance = min(half_w - abs(x), half_h - abs(y))
+    elif shape.kind == "triangle":
+        vertices = ((0.0, -half_h), (half_w, half_h), (-half_w, half_h))
+        edge_distance = min(
+            _distance_to_segment(x, y, *start, *end)
+            for start, end in zip(vertices, vertices[1:] + vertices[:1])
         )
-        return outer and (fill_mode == "fill" or not inner)
-    if shape.kind == "line":
+        distance = edge_distance if _in_triangle(x, y, *vertices[0], *vertices[1], *vertices[2]) else -edge_distance
+    elif shape.kind == "line":
         thickness = stroke if fill_mode == "stroke" else half_h
-        return _distance_to_segment(x, y, -half_w, 0.0, half_w, 0.0) <= thickness
-    return False
+        distance = thickness - _distance_to_segment(x, y, -half_w, 0.0, half_w, 0.0)
+    else:
+        return 0.0
+
+    expansion = float(state.get("mask_expansion", 0.0))
+    if fill_mode == "stroke" and shape.kind != "line":
+        signed_mask_distance = min(distance + expansion, stroke + expansion - distance)
+    else:
+        signed_mask_distance = distance + expansion
+    feather = max(0.0, float(state.get("feather", 0.0)))
+    if feather <= 0.000001:
+        return 1.0 if signed_mask_distance >= 0.0 else 0.0
+    amount = max(0.0, min(1.0, 0.5 + signed_mask_distance / feather))
+    return amount * amount * (3.0 - 2.0 * amount)
 
 
 def render_leds(project: Project, led_points: Iterable[tuple[float, float]], time_ms: int) -> list[Color]:
@@ -46,9 +62,12 @@ def render_leds(project: Project, led_points: Iterable[tuple[float, float]], tim
         for point_index, point in enumerate(points):
             color = result[point_index]
             for shape, state in shape_states:
-                if not state["visible"] or not point_inside(shape, state, point):
+                if not state["visible"]:
                     continue
-                alpha = max(0.0, min(1.0, float(state["opacity"])))
+                coverage = shape_coverage(shape, state, point)
+                if coverage <= 0.0:
+                    continue
+                alpha = max(0.0, min(1.0, float(state["opacity"]))) * coverage
                 src = gradient_color(state, point)
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
             for src, alpha in random_led_overlays[point_index]:
@@ -129,7 +148,7 @@ def sample_gradient(stops, amount: float) -> Color:
 def _local_point(state: dict, point: tuple[float, float]) -> tuple[float, float]:
     px, py = point
     dx, dy = px - state["x"], py - state["y"]
-    angle = radians(-float(state["rotation"]))
+    angle = radians(-float(state.get("rotation_total", state["rotation"])))
     return dx * cos(angle) - dy * sin(angle), dx * sin(angle) + dy * cos(angle)
 
 

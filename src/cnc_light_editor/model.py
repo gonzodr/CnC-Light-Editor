@@ -61,8 +61,11 @@ class Shape:
     width: float = 0.2
     height: float = 0.2
     rotation: float = 0.0
+    rotation_turns: float = 0.0
     color: Color = (255, 90, 20)
     opacity: float = 1.0
+    feather: float = 0.0
+    mask_expansion: float = 0.0
     fill_mode: str = "fill"
     stroke_width: float = 0.012
     gradient_type: str = "solid"
@@ -102,10 +105,12 @@ class Shape:
 
     def state_at(self, time_ms: int) -> dict[str, Any]:
         state = {prop: self.value_at(prop, time_ms) for prop in (
-            "x", "y", "width", "height", "rotation", "color", "opacity",
+            "x", "y", "width", "height", "rotation", "rotation_turns", "color", "opacity",
+            "feather", "mask_expansion",
             "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
             "gradient_angle", "visible",
         )}
+        state["rotation_total"] = state["rotation"] + state["rotation_turns"] * 360.0
         state["gradient_stops"] = self.gradient_stops
         return state
 

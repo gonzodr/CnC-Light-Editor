@@ -19,6 +19,7 @@ from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shap
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "projects" / "current.cnclight"
 EXPORT_FILE = ROOT / "exports" / "effect_data.h"
+WINDOW_ICON = ROOT / "assets" / "CnC_LightE_ico.png"
 PALETTE = [
     (255, 70, 40), (255, 155, 20), (255, 230, 50), (80, 220, 90),
     (30, 180, 255), (90, 90, 255), (210, 80, 255), (255, 255, 255),
@@ -35,14 +36,16 @@ PANEL_DARK = (24, 26, 33)
 TIMELINE_PROPERTY_LABELS = {
     "x": "Position X", "y": "Position Y",
     "width": "Scale X", "height": "Scale Y",
-    "rotation": "Rotation", "color": "Color", "opacity": "Opacity",
+    "rotation": "Rotation", "rotation_turns": "Turns", "color": "Color", "opacity": "Opacity",
+    "feather": "Feather", "mask_expansion": "Mask expansion",
     "fill_mode": "Fill mode", "stroke_width": "Stroke width",
     "gradient_type": "Gradient type", "gradient_radial_mode": "Radial mode",
     "gradient_angle": "Gradient angle", "visible": "Visibility",
     "enabled": "Enabled",
 }
 GRAPH_NUMERIC_PROPERTIES = {
-    "x", "y", "width", "height", "rotation", "opacity",
+    "x", "y", "width", "height", "rotation", "rotation_turns", "opacity",
+    "feather", "mask_expansion",
     "stroke_width", "gradient_angle",
 }
 DEFAULT_BEZIER = (0.25, 0.10, 0.25, 1.0)
@@ -57,6 +60,9 @@ class TimelineRow:
 
 
 class Editor:
+    _cached_playfield: pygame.Surface | None = None
+    _cached_layout_guide: pygame.Surface | None = None
+
     def __init__(self, screen: pygame.Surface):
         self.screen = screen
         self.clock = pygame.time.Clock()
@@ -128,15 +134,22 @@ class Editor:
         self.led_map = LedMap.load(self.led_map_path)
         self.status = f"Ready — {len(self.led_map.leds)} playfield LEDs"
         self.led_points = self.led_map.normalized_points()
-        self.playfield = pygame.image.load(str(ROOT / "assets" / "playfield.png")).convert_alpha()
-        guide_source = pygame.image.load(str(ROOT / "assets" / "playfield_layout.png")).convert_alpha()
-        guide_source = pygame.transform.smoothscale(guide_source, (2048, 990))
-        guide_mask = pygame.mask.from_surface(guide_source, 40)
-        guide = guide_mask.to_surface(
-            setcolor=(225, 229, 238, 215),
-            unsetcolor=(0, 0, 0, 0),
-        ).convert_alpha()
-        self.layout_guide = pygame.transform.rotate(guide, -90)
+        if Editor._cached_playfield is None or Editor._cached_layout_guide is None:
+            Editor._cached_playfield = pygame.image.load(
+                str(ROOT / "assets" / "playfield.png")
+            ).convert_alpha()
+            guide_source = pygame.image.load(
+                str(ROOT / "assets" / "playfield_layout.png")
+            ).convert_alpha()
+            guide_source = pygame.transform.smoothscale(guide_source, (2048, 990))
+            guide_mask = pygame.mask.from_surface(guide_source, 40)
+            guide = guide_mask.to_surface(
+                setcolor=(225, 229, 238, 215),
+                unsetcolor=(0, 0, 0, 0),
+            ).convert_alpha()
+            Editor._cached_layout_guide = pygame.transform.rotate(guide, -90)
+        self.playfield = Editor._cached_playfield
+        self.layout_guide = Editor._cached_layout_guide
         self._sync_led_fields()
         self._add_demo_shape()
 
@@ -413,7 +426,10 @@ class Editor:
                 )
                 open_property_input = (
                     self.drag_mode == "scrub"
-                    and self.scrub_prop in {"x", "y", "width", "height", "rotation", "opacity"}
+                    and self.scrub_prop in {
+                        "x", "y", "width", "height", "rotation", "rotation_turns", "opacity",
+                        "feather", "mask_expansion",
+                    }
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
                 if not self.duration_editing:
@@ -426,7 +442,12 @@ class Editor:
                     prop = self.scrub_prop
                     value = float(self.selected.state_at(self.current_ms)[prop])
                     self.property_editing = prop
-                    self.property_input = f"{value:.1f}" if prop == "rotation" else f"{value:.3f}"
+                    self.property_input = (
+                        f"{value:.1f}" if prop == "rotation"
+                        else f"{value:.0f}" if prop == "rotation_turns"
+                        else f"{value * 100:.1f}" if prop in {"feather", "mask_expansion"}
+                        else f"{value:.3f}"
+                    )
                     self.property_input_select_all = True
                     self.status = f"Type {TIMELINE_PROPERTY_LABELS[prop]}, then press Enter"
                 self.drag_mode = None
@@ -536,11 +557,11 @@ class Editor:
             self._commit_change()
         elif event.key == pygame.K_LEFTBRACKET and self.selected:
             self._begin_change()
-            self._set_animated("rotation", self.selected.state_at(self.current_ms)["rotation"] - 5)
+            self._set_rotation_total(self.selected.state_at(self.current_ms)["rotation_total"] - 5)
             self._commit_change()
         elif event.key == pygame.K_RIGHTBRACKET and self.selected:
             self._begin_change()
-            self._set_animated("rotation", self.selected.state_at(self.current_ms)["rotation"] + 5)
+            self._set_rotation_total(self.selected.state_at(self.current_ms)["rotation_total"] + 5)
             self._commit_change()
         elif event.key == pygame.K_g:
             self.snap = not self.snap
@@ -632,7 +653,8 @@ class Editor:
         elif action == "keyframe" and self.selected:
             state = self.selected.state_at(self.current_ms)
             for prop in (
-                "x", "y", "width", "height", "rotation", "color", "opacity",
+                "x", "y", "width", "height", "rotation", "rotation_turns", "color", "opacity",
+                "feather", "mask_expansion",
                 "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
                 "gradient_angle", "visible",
             ):
@@ -1069,7 +1091,7 @@ class Editor:
         center = pygame.Vector2(self._world_to_screen((state["x"], state["y"]), canvas))
         half_w = state["width"] * canvas.width / 2
         half_h = state["height"] * canvas.height / 2
-        angle = math.radians(state["rotation"])
+        angle = math.radians(state["rotation_total"])
         axis_x = pygame.Vector2(math.cos(angle), math.sin(angle))
         axis_y = pygame.Vector2(-math.sin(angle), math.cos(angle))
         corners = [
@@ -1121,7 +1143,7 @@ class Editor:
             self._set_animated("rotation", angle % 360)
             return
 
-        angle = math.radians(-state["rotation"])
+        angle = math.radians(-state["rotation_total"])
         local = vector.rotate_rad(angle)
         width = max(0.01, abs(local.x) * 2 / canvas.width)
         height = max(0.01, abs(local.y) * 2 / canvas.height)
@@ -1244,7 +1266,10 @@ class Editor:
             padding = max(0.05, abs(low) * 0.35)
         else:
             padding = (high - low) * 0.16
-        return max(0.0, low - padding), high + padding
+        minimum = low - padding
+        if prop not in {"rotation_turns", "mask_expansion"}:
+            minimum = max(0.0, minimum)
+        return minimum, high + padding
 
     def _graph_point(
         self, time_ms: int, value: float, timeline: pygame.Rect,
@@ -1443,7 +1468,9 @@ class Editor:
             "x": (0.0, 1.0), "y": (0.0, 1.0), "opacity": (0.0, 1.0),
             "width": (0.01, 5.0), "height": (0.01, 5.0),
             "rotation": (0.0, 360.0), "gradient_angle": (0.0, 360.0),
+            "rotation_turns": (-100.0, 100.0),
             "stroke_width": (0.001, 0.05),
+            "feather": (0.0, 0.1), "mask_expansion": (-0.1, 0.1),
         }
         minimum, maximum = limits[prop]
         updated: set[tuple[str, str, int]] = set()
@@ -1910,9 +1937,19 @@ class Editor:
         prop = self.scrub_prop
         start = self.drag_shape_state[prop]
         delta = screen_x - self.drag_origin[0]
+        if prop == "rotation":
+            total = start + self.drag_shape_state.get("rotation_turns", 0.0) * 360.0 + delta * 0.5
+            if self.snap:
+                total = round(total)
+            self._set_rotation_total(total)
+            return
         sensitivity = 0.002 if prop in {"x", "y", "width", "height", "opacity"} else 0.5
         if prop == "stroke_width":
             sensitivity = 0.00025
+        elif prop in {"feather", "mask_expansion"}:
+            sensitivity = 0.00025
+        elif prop == "rotation_turns":
+            sensitivity = 0.02
         value = start + delta * sensitivity
         if prop in {"x", "y", "opacity"}:
             value = max(0.0, min(1.0, value))
@@ -1920,10 +1957,14 @@ class Editor:
             value = max(0.01, value)
         elif prop == "stroke_width":
             value = max(0.001, min(0.05, value))
-        elif prop == "rotation":
-            value %= 360
+        elif prop == "feather":
+            value = max(0.0, min(0.1, value))
+        elif prop == "mask_expansion":
+            value = max(-0.1, min(0.1, value))
+        elif prop == "rotation_turns":
+            value = max(-100.0, min(100.0, round(value)))
         if self.snap:
-            step = 0.001 if prop == "stroke_width" else 0.01 if prop != "rotation" else 1
+            step = 0.001 if prop in {"stroke_width", "feather", "mask_expansion"} else 0.01
             value = round(value / step) * step
         self._set_animated(prop, value)
 
@@ -1934,6 +1975,12 @@ class Editor:
             setattr(self.selected, prop, value)
         else:
             self.selected.add_keyframe(prop, self.current_ms, value)
+
+    def _set_rotation_total(self, total_degrees: float) -> None:
+        turns = math.floor(total_degrees / 360.0)
+        angle = total_degrees - turns * 360.0
+        self._set_animated("rotation", round(angle, 6))
+        self._set_animated("rotation_turns", float(turns))
 
     def _pick(self, point: tuple[float, float]) -> Shape | None:
         for layer in reversed(self.project.layers):
@@ -2390,23 +2437,46 @@ class Editor:
             except ValueError:
                 self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be a number"
                 return
+            if prop in {"feather", "mask_expansion"}:
+                value /= 100.0
             limits = {
                 "x": (0.0, 1.0), "y": (0.0, 1.0),
                 "width": (0.01, 5.0), "height": (0.01, 5.0),
                 "opacity": (0.0, 1.0),
+                "rotation_turns": (-100.0, 100.0),
+                "feather": (0.0, 0.1), "mask_expansion": (-0.1, 0.1),
             }
             if prop in limits and not limits[prop][0] <= value <= limits[prop][1]:
                 low, high = limits[prop]
+                if prop in {"feather", "mask_expansion"}:
+                    low, high = low * 100.0, high * 100.0
                 self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be {low:g}–{high:g}"
                 return
-            if prop == "rotation":
-                value %= 360.0
             self._begin_change()
-            self._set_animated(prop, value)
+            if prop == "rotation":
+                state = self.selected.state_at(self.current_ms)
+                added_turns = math.floor(value / 360.0)
+                angle = value - added_turns * 360.0
+                self._set_animated("rotation", round(angle, 6))
+                self._set_animated(
+                    "rotation_turns", state.get("rotation_turns", 0.0) + added_turns,
+                )
+                value = angle
+            elif prop == "rotation_turns":
+                value = float(round(value))
+                self._set_animated(prop, value)
+            else:
+                self._set_animated(prop, value)
             self._commit_change()
             self.property_editing = None
             self.property_input_select_all = False
-            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {value:.3f}"
+            if prop in {"rotation", "rotation_turns"}:
+                state = self.selected.state_at(self.current_ms)
+                self.status = f"Rotation: {state['rotation']:.1f}° ×{state['rotation_turns']:.0f}"
+            else:
+                display_value = value * 100.0 if prop in {"feather", "mask_expansion"} else value
+                suffix = "%" if prop in {"feather", "mask_expansion"} else ""
+                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {display_value:.3f}{suffix}"
             return
         if event.key == pygame.K_ESCAPE:
             self.property_editing = None
@@ -2591,63 +2661,80 @@ class Editor:
                 cy = canvas.y + int(state["y"] * canvas.height)
                 w = max(4, int(state["width"] * canvas.width))
                 h = max(4, int(state["height"] * canvas.height))
-                surface = pygame.Surface((w + 8, h + 8), pygame.SRCALPHA)
-                color = (*state["color"], int(220 * state["opacity"]))
-                local = surface.get_rect().inflate(-6, -6)
-                stroke_px = max(1, round(state.get("stroke_width", 0.012) * min(canvas.size)))
-                stroke_px = min(stroke_px, max(1, min(local.size) // 2))
-                draw_width = stroke_px if state.get("fill_mode", "fill") == "stroke" else 0
+                canvas_scale = min(canvas.size)
+                expansion_px = float(state.get("mask_expansion", 0.0)) * canvas_scale
+                feather_px = max(0.0, float(state.get("feather", 0.0)) * canvas_scale)
+                pad = max(4, math.ceil(max(0.0, expansion_px) + feather_px / 2.0) + 3)
+                surface = pygame.Surface((w + pad * 2, h + pad * 2), pygame.SRCALPHA)
+                local = pygame.Rect(pad, pad, w, h)
+                mask = self._shape_mask_surface(
+                    surface.get_size(), shape.kind, local, state, canvas_scale,
+                )
                 gradient = (
-                    draw_width == 0
+                    state.get("fill_mode", "fill") == "fill"
                     and state.get("gradient_type", "solid") in {"linear", "radial"}
                     and len(state.get("gradient_stops", [])) >= 2
                 )
                 if gradient:
-                    self._draw_gradient_shape(surface, shape.kind, local, state)
-                elif shape.kind == "ellipse":
-                    pygame.draw.ellipse(surface, color, local, draw_width)
-                elif shape.kind == "rectangle":
-                    pygame.draw.rect(surface, color, local, draw_width, border_radius=3)
-                elif shape.kind == "triangle":
-                    pygame.draw.polygon(
-                        surface, color,
-                        [(surface.get_width() // 2, 3), (surface.get_width() - 3, surface.get_height() - 3), (3, surface.get_height() - 3)],
-                        draw_width,
+                    paint = self._gradient_surface(
+                        surface.get_size(), state["gradient_stops"], state["gradient_type"],
+                        state.get("gradient_radial_mode", "radius"),
+                        float(state.get("gradient_angle", 0.0)), int(220 * state["opacity"]),
                     )
                 else:
-                    line_width = stroke_px if state.get("fill_mode") == "stroke" else max(2, h - 6)
-                    pygame.draw.line(surface, color, (4, surface.get_height() // 2), (surface.get_width() - 4, surface.get_height() // 2), line_width)
-                rotated = pygame.transform.rotate(surface, -state["rotation"])
+                    paint = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+                    paint.fill((*state["color"], int(220 * state["opacity"])))
+                paint.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                surface.blit(paint, (0, 0))
+                rotated = pygame.transform.rotate(surface, -state["rotation_total"])
                 rect = rotated.get_rect(center=(cx, cy))
                 self.screen.blit(rotated, rect)
 
-    def _draw_gradient_shape(self, surface: pygame.Surface, kind: str, local: pygame.Rect, state: dict) -> None:
-        mask = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-        white = (255, 255, 255, 255)
-        if kind == "ellipse":
-            pygame.draw.ellipse(mask, white, local)
-        elif kind == "rectangle":
-            pygame.draw.rect(mask, white, local, border_radius=3)
-        elif kind == "triangle":
-            pygame.draw.polygon(mask, white, [
-                (surface.get_width() // 2, 3),
-                (surface.get_width() - 3, surface.get_height() - 3),
-                (3, surface.get_height() - 3),
-            ])
+    def _shape_mask_surface(
+        self, size: tuple[int, int], kind: str, local: pygame.Rect,
+        state: dict, canvas_scale: int,
+    ) -> pygame.Surface:
+        mask = pygame.Surface(size, pygame.SRCALPHA)
+        expansion = float(state.get("mask_expansion", 0.0)) * canvas_scale
+        feather = max(0.0, float(state.get("feather", 0.0)) * canvas_scale)
+        if feather <= 0.01:
+            samples = [(expansion, 255)]
         else:
-            pygame.draw.line(
-                mask, white, (4, surface.get_height() // 2),
-                (surface.get_width() - 4, surface.get_height() // 2), max(2, local.height),
-            )
-        gradient_fill = self._gradient_surface(
-            local.size, state["gradient_stops"], state["gradient_type"],
-            state.get("gradient_radial_mode", "radius"),
-            float(state.get("gradient_angle", 0.0)), int(220 * state["opacity"]),
-        )
-        gradient = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-        gradient.blit(gradient_fill, local.topleft)
-        gradient.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-        surface.blit(gradient, (0, 0))
+            steps = max(6, min(24, math.ceil(feather)))
+            samples = [
+                (expansion + feather * (0.5 - index / steps), round(255 * index / steps))
+                for index in range(steps + 1)
+            ]
+        for offset, alpha in samples:
+            self._draw_mask_geometry(mask, kind, local, state, offset, alpha, canvas_scale)
+        return mask
+
+    @staticmethod
+    def _draw_mask_geometry(
+        mask: pygame.Surface, kind: str, local: pygame.Rect, state: dict,
+        offset: float, alpha: int, canvas_scale: int,
+    ) -> None:
+        rect = local.inflate(round(offset * 2), round(offset * 2))
+        if rect.width <= 0 or rect.height <= 0 or alpha <= 0:
+            return
+        color = (255, 255, 255, max(0, min(255, alpha)))
+        fill_mode = state.get("fill_mode", "fill")
+        stroke = float(state.get("stroke_width", 0.012)) * canvas_scale
+        draw_width = 0
+        if fill_mode == "stroke":
+            draw_width = max(1, round(stroke + offset * 2))
+            draw_width = min(draw_width, max(1, min(rect.size) // 2))
+        if kind == "ellipse":
+            pygame.draw.ellipse(mask, color, rect, draw_width)
+        elif kind == "rectangle":
+            pygame.draw.rect(mask, color, rect, draw_width, border_radius=3)
+        elif kind == "triangle":
+            pygame.draw.polygon(mask, color, [
+                (rect.centerx, rect.top), (rect.right, rect.bottom), (rect.left, rect.bottom),
+            ], draw_width)
+        else:
+            line_width = draw_width if fill_mode == "stroke" else max(1, rect.height)
+            pygame.draw.line(mask, color, (rect.left, rect.centery), (rect.right, rect.centery), line_width)
 
     @staticmethod
     def _gradient_surface(
@@ -3203,7 +3290,11 @@ class Editor:
             properties = [
                 ("x", "X", state["x"]), ("y", "Y", state["y"]),
                 ("width", "W", state["width"]), ("height", "H", state["height"]),
-                ("rotation", "ROT", state["rotation"]), ("opacity", "OPACITY", state["opacity"]),
+                ("rotation", "ROT", state["rotation"]),
+                ("rotation_turns", "TURNS", state["rotation_turns"]),
+                ("opacity", "OPACITY", state["opacity"]),
+                ("feather", "FEATHER", state["feather"]),
+                ("mask_expansion", "EXPAND", state["mask_expansion"]),
             ]
             for index, (prop, label, value) in enumerate(properties):
                 col = index % 2
@@ -3224,12 +3315,17 @@ class Editor:
                     if (pygame.time.get_ticks() // 500) % 2 == 0:
                         value_text += "|"
                 else:
-                    value_text = f"{value:.1f}°" if prop == "rotation" else f"{value:.3f}"
+                    value_text = (
+                        f"{value:.1f}°" if prop == "rotation"
+                        else f"×{value:.0f}" if prop == "rotation_turns"
+                        else f"{value * 100:.1f}%" if prop in {"feather", "mask_expansion"}
+                        else f"{value:.3f}"
+                    )
                 self.screen.blit(self.small.render(label, True, (130, 138, 157)), (field.x + 7, field.y + 7))
                 rendered = self.small.render(value_text, True, (231, 234, 242))
                 self.screen.blit(rendered, (field.right - rendered.get_width() - 7, field.y + 7))
                 self.buttons.append((field, f"scrub:{prop}", label))
-            y += 119
+            y += 193
             self.screen.blit(self.small.render("Style", True, (172, 178, 193)), (x, y))
             y += 23
             self._button(
@@ -3557,6 +3653,8 @@ def main() -> None:
     if args.smoke_test:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     pygame.init()
+    if WINDOW_ICON.is_file():
+        pygame.display.set_icon(pygame.image.load(WINDOW_ICON))
     screen = pygame.display.set_mode((1280, 900), pygame.RESIZABLE)
     pygame.display.set_caption("CnC Pinball — Light Effect Editor")
     try:
