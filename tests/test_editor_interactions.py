@@ -203,6 +203,53 @@ def test_timeline_layer_selection_and_layer_delete():
     assert editor.active_layer == 0
 
 
+def test_timeline_layer_rows_scroll_and_keep_absolute_actions():
+    editor = make_editor()
+    editor.project.layers = [Layer(f"Layer {index}") for index in range(8)]
+    editor.project.layers[7].shapes.append(Shape("ellipse", "Last shape"))
+    _, _, timeline = editor.layout()
+    capacity = editor._timeline_layer_capacity(timeline)
+
+    editor.draw()
+    visible_selects = {
+        action for _rect, action, _label in editor.buttons if action.startswith("select_layer:")
+    }
+    assert visible_selects == {f"select_layer:{index}" for index in range(capacity)}
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEWHEEL,
+        {"y": -2, "x": 0, "pos": (timeline.x + 60, editor._timeline_track(timeline).y + 10)},
+    ))
+    editor.draw()
+    visible_selects = {
+        action for _rect, action, _label in editor.buttons if action.startswith("select_layer:")
+    }
+    assert editor.timeline_layer_scroll == 2
+    assert visible_selects == {f"select_layer:{index}" for index in range(2, 2 + capacity)}
+
+    editor._action("select_layer:7")
+    assert editor.timeline_layer_scroll == 8 - capacity
+    assert editor._selected_timeline_row_y(timeline) == editor._timeline_track(timeline).y + 15 + (capacity - 1) * 32
+
+
+def test_timeline_on_off_button_toggles_layer_without_selecting_another_row():
+    editor = make_editor()
+    editor.project.layers = [Layer("First"), Layer("Second")]
+    editor.active_layer = 0
+    editor.draw()
+    toggle = next(
+        rect for rect, action, _label in editor.buttons if action == "toggle_layer:1"
+    )
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": toggle.center},
+    ))
+
+    assert editor.project.layers[1].visible is False
+    assert editor.active_layer == 0
+    assert "OFF" in editor.status
+
+
 def test_ctrl_d_duplicates_active_layer_with_unique_ids_and_undo():
     editor = make_editor()
     editor._create_shape("rectangle", (0.4, 0.4))

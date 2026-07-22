@@ -84,6 +84,7 @@ class Editor:
         self.pan = pygame.Vector2()
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
+        self.timeline_layer_scroll = 0
         self.undo_stack: list[Project] = []
         self.redo_stack: list[Project] = []
         self.change_snapshot: Project | None = None
@@ -369,9 +370,15 @@ class Editor:
             return
 
         if event.type == pygame.MOUSEWHEEL:
-            mouse = pygame.mouse.get_pos()
+            mouse = getattr(event, "pos", pygame.mouse.get_pos())
             if timeline.collidepoint(mouse):
-                if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                layer_column = pygame.Rect(
+                    timeline.x, self._timeline_track(timeline).y,
+                    180, self._timeline_track(timeline).height,
+                )
+                if layer_column.collidepoint(mouse) and not self._active_imported_effect():
+                    self._scroll_timeline_layers(-event.y, timeline)
+                elif pygame.key.get_mods() & pygame.KMOD_SHIFT:
                     visible_ms = self._playback_duration() / self.timeline_zoom
                     self.timeline_scroll_ms -= event.y * visible_ms * 0.12
                     self._clamp_timeline_scroll()
@@ -476,6 +483,7 @@ class Editor:
             self.project.layers.append(Layer(f"Layer {len(self.project.layers) + 1}"))
             self.active_layer = len(self.project.layers) - 1
             self.selected = None
+            self._ensure_active_layer_visible()
         elif action == "duplicate_layer":
             source = self.project.layers[self.active_layer]
             selected_index = source.shapes.index(self.selected) if self.selected in source.shapes else None
@@ -491,6 +499,7 @@ class Editor:
             self.selected = clone.shapes[selected_index] if selected_index is not None else None
             self.selected_keyframes.clear()
             self.status = f"Duplicated layer: {source.name}"
+            self._ensure_active_layer_visible()
         elif action == "delete_layer":
             if len(self.project.layers) == 1:
                 self.status = "A project must keep at least one layer"
@@ -501,6 +510,7 @@ class Editor:
                     self.selected_keyframes.clear()
                 self.active_layer = min(self.active_layer, len(self.project.layers) - 1)
                 self.status = f"Deleted layer: {removed.name}"
+                self._ensure_active_layer_visible()
         elif action == "delete" and self.selected:
             for layer in self.project.layers:
                 if self.selected in layer.shapes:
@@ -787,6 +797,7 @@ class Editor:
                 self.selected = layer.shapes[-1] if layer.shapes else None
             self.selected_keyframes.clear()
             self.status = f"Active layer: {layer.name}"
+            self._ensure_active_layer_visible()
         elif action.startswith("toggle_layer:"):
             index = int(action.split(":")[1])
             layer = self.project.layers[index]
@@ -794,7 +805,7 @@ class Editor:
             if not layer.visible and self.selected in layer.shapes:
                 self.selected = None
                 self.selected_keyframes.clear()
-                self.status = f"Hidden layer: {layer.name}"
+            self.status = f"Layer {layer.name}: {'ON' if layer.visible else 'OFF'}"
         if mutating:
             self._commit_change()
 
@@ -815,6 +826,7 @@ class Editor:
         selected_id = self.selected.id if self.selected else None
         self.project = deepcopy(project)
         self.active_layer = min(self.active_layer, len(self.project.layers) - 1)
+        self._ensure_active_layer_visible()
         self.selected = next(
             (shape for layer in self.project.layers for shape in layer.shapes if shape.id == selected_id),
             None,
@@ -947,6 +959,31 @@ class Editor:
     @staticmethod
     def _timeline_track(rect: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(rect.x + 180, rect.y + 35, max(80, rect.width - 195), rect.height - 48)
+
+    def _timeline_layer_capacity(self, timeline: pygame.Rect) -> int:
+        # Keep one text line free below the rows for timeline help and the
+        # scroll-range indicator.
+        return max(1, (self._timeline_track(timeline).height - 24) // 32)
+
+    def _clamp_timeline_layer_scroll(self, timeline: pygame.Rect) -> None:
+        maximum = max(0, len(self.project.layers) - self._timeline_layer_capacity(timeline))
+        self.timeline_layer_scroll = max(0, min(maximum, self.timeline_layer_scroll))
+
+    def _scroll_timeline_layers(self, delta: int, timeline: pygame.Rect) -> None:
+        self.timeline_layer_scroll += delta
+        self._clamp_timeline_layer_scroll(timeline)
+        start = self.timeline_layer_scroll + 1
+        end = min(len(self.project.layers), start + self._timeline_layer_capacity(timeline) - 1)
+        self.status = f"Timeline layers {start}–{end} / {len(self.project.layers)}"
+
+    def _ensure_active_layer_visible(self, timeline: pygame.Rect | None = None) -> None:
+        timeline = timeline or self.layout()[2]
+        capacity = self._timeline_layer_capacity(timeline)
+        if self.active_layer < self.timeline_layer_scroll:
+            self.timeline_layer_scroll = self.active_layer
+        elif self.active_layer >= self.timeline_layer_scroll + capacity:
+            self.timeline_layer_scroll = self.active_layer - capacity + 1
+        self._clamp_timeline_layer_scroll(timeline)
 
     def _duration_slider_rect(self, _timeline: pygame.Rect | None = None) -> pygame.Rect:
         right_edge = self.screen.get_width() - INSPECTOR_WIDTH
@@ -1096,17 +1133,22 @@ class Editor:
 
     def _selected_timeline_row_y(self, timeline: pygame.Rect) -> int | None:
         if self.random_led_editor_open and self._active_random_led_effect():
-            layer_index = self.active_layer if self.active_layer < 5 else None
+            layer_index = self.active_layer
         elif self.selected:
             layer_index = next(
-                (index for index, layer in enumerate(self.project.layers[:5]) if self.selected in layer.shapes),
+                (index for index, layer in enumerate(self.project.layers) if self.selected in layer.shapes),
                 None,
             )
         else:
             layer_index = None
         if layer_index is None:
             return None
-        return self._timeline_track(timeline).y + 15 + layer_index * 32
+        self._clamp_timeline_layer_scroll(timeline)
+        capacity = self._timeline_layer_capacity(timeline)
+        if not self.timeline_layer_scroll <= layer_index < self.timeline_layer_scroll + capacity:
+            return None
+        visible_index = layer_index - self.timeline_layer_scroll
+        return self._timeline_track(timeline).y + 15 + visible_index * 32
 
     @staticmethod
     def _inactive_layer_keyframe_times(layer: Layer, active_target) -> set[int]:
@@ -1378,6 +1420,7 @@ class Editor:
         self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
+        self.timeline_layer_scroll = 0
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.change_snapshot = None
@@ -2124,27 +2167,38 @@ class Editor:
                     width = 2 if frame_index == outro_start and outro_start < total_steps else 1
                     pygame.draw.line(self.screen, color, (x, row.y + 3), (x, row.bottom - 3), width)
             row_y += 32
-        for index, layer in enumerate([] if imported else self.project.layers[:5]):
+        self._clamp_timeline_layer_scroll(rect)
+        layer_capacity = self._timeline_layer_capacity(rect)
+        layer_start = self.timeline_layer_scroll
+        layer_end = min(len(self.project.layers), layer_start + layer_capacity)
+        visible_layers = [] if imported else list(enumerate(self.project.layers))[layer_start:layer_end]
+        for index, layer in visible_layers:
             active = index == self.active_layer
             row = pygame.Rect(rect.x, row_y - 11, rect.width, 31)
             if active:
                 pygame.draw.rect(self.screen, (42, 54, 76), row)
                 pygame.draw.rect(self.screen, ACCENT, (row.x, row.y, 3, row.height))
-            eye = "●" if layer.visible else "○"
             random_effect = self._active_random_led_effect() if self.random_led_editor_open and index == self.active_layer else None
             shape_suffix = (
                 f"  /  FX: {random_effect.name}" if random_effect else
                 f"  /  {self.selected.name}" if self.selected in layer.shapes else ""
             )
+            layer_text = f"{layer.name}{shape_suffix}"
+            while len(layer_text) > 5 and self.small.size(layer_text)[0] > 124:
+                layer_text = layer_text[:-4] + "..."
             label = self.small.render(
-                f"{eye}  {layer.name}{shape_suffix}",
+                layer_text,
                 True, (226, 230, 239) if active else (166, 172, 187),
             )
-            self.screen.blit(label, (rect.x + 13, row_y - 3))
+            self.screen.blit(label, (rect.x + 51, row_y - 3))
             self.buttons.append((
-                pygame.Rect(rect.x, row.y, 180, row.height),
+                pygame.Rect(rect.x + 47, row.y, 133, row.height),
                 f"select_layer:{index}", layer.name,
             ))
+            self._button(
+                pygame.Rect(rect.x + 7, row.y + 5, 37, 21),
+                f"toggle_layer:{index}", "ON" if layer.visible else "OFF", layer.visible,
+            )
             pygame.draw.line(self.screen, (47, 51, 61), (track.x, row.bottom), (track.right, row.bottom))
             target = random_effect or (self.selected if self.selected in layer.shapes else None)
             inactive_times = self._inactive_layer_keyframe_times(layer, target)
@@ -2181,6 +2235,18 @@ class Editor:
                         )
             row_y += 32
 
+        if not imported and len(self.project.layers) > layer_capacity:
+            gutter = pygame.Rect(track.x - 6, track.y, 3, layer_capacity * 32)
+            pygame.draw.rect(self.screen, (48, 53, 65), gutter, border_radius=2)
+            handle_height = max(24, round(gutter.height * layer_capacity / len(self.project.layers)))
+            maximum_scroll = len(self.project.layers) - layer_capacity
+            travel = gutter.height - handle_height
+            handle_y = gutter.y + round(travel * self.timeline_layer_scroll / max(1, maximum_scroll))
+            pygame.draw.rect(
+                self.screen, (104, 126, 164),
+                pygame.Rect(gutter.x, handle_y, gutter.width, handle_height), border_radius=2,
+            )
+
         play_x = round(self._time_to_timeline_x(self.current_ms, rect))
         if track.x <= play_x <= track.right:
             pygame.draw.polygon(self.screen, (255, 83, 72), [(play_x - 6, rect.y + 20), (play_x + 6, rect.y + 20), (play_x, rect.y + 29)])
@@ -2202,6 +2268,9 @@ class Editor:
             "Right-drag: select keys • Ctrl: add • drag selected key: offset • right-click: menu"
         )
         self.screen.blit(self.small.render(hint, True, (132, 139, 155)), (track.x, rect.bottom - 22))
+        if not imported and len(self.project.layers) > layer_capacity:
+            range_label = f"Layers {layer_start + 1}–{layer_end}/{len(self.project.layers)}  •  wheel here"
+            self.screen.blit(self.small.render(range_label, True, (116, 128, 151)), (rect.x + 7, rect.bottom - 22))
         pygame.draw.rect(self.screen, (29, 32, 40), zoom_rect, border_radius=3)
         self.screen.blit(zoom_label, zoom_label.get_rect(center=zoom_rect.center))
 
