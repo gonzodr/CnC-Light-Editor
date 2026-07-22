@@ -265,7 +265,7 @@ def test_timeline_layer_expands_into_individual_property_rows():
     editor.draw()
     actions = {action for _rect, action, _label in editor.buttons}
     assert "toggle_timeline_layer:0" in actions
-    assert f"select_timeline_target:{editor.selected.id}" in actions
+    assert f"select_timeline_channel:{editor.selected.id}:x" in actions
 
 
 def test_expanded_property_row_selects_only_its_own_keyframe():
@@ -343,6 +343,80 @@ def test_marquee_and_drag_offset_keyframes_across_property_rows_and_targets():
     restored_second = editor._find_keyframe_target(second.id)
     assert [frame.time_ms for frame in restored_first.keyframes["x"]] == [1000]
     assert [frame.time_ms for frame in restored_second.keyframes["opacity"]] == [2000]
+
+
+def test_graph_editor_chooses_active_numeric_channel_and_toggles_back():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.add_keyframe("x", 0, 0.2)
+    editor.selected.add_keyframe("x", 1000, 0.8)
+
+    editor._action("toggle_timeline_mode")
+
+    assert editor.timeline_mode == "graph"
+    assert editor.graph_target_id == editor.selected.id
+    assert editor.graph_prop == "x"
+    editor.draw()
+    assert "toggle_timeline_mode" in {
+        action for _rect, action, _label in editor.buttons
+    }
+
+    editor._action("toggle_timeline_mode")
+    assert editor.timeline_mode == "dope"
+
+
+def test_graph_keyframe_drag_changes_time_and_value_and_undoes_together():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    shape = editor.selected
+    shape.add_keyframe("x", 1000, 0.25)
+    shape.add_keyframe("x", 2000, 0.75)
+    editor._action("toggle_timeline_mode")
+    _, _, timeline = editor.layout()
+    start = editor._graph_point(1000, 0.25, timeline)
+    target_x = round(editor._time_to_timeline_x(1500, timeline))
+    target_y = start[1] - round(editor._graph_area(timeline).height * 0.25)
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": start},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {"pos": (target_x, target_y), "rel": (0, 0), "buttons": (1, 0, 0)},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"button": 1, "pos": (target_x, target_y)},
+    ))
+
+    moved = shape.keyframes["x"][0]
+    assert moved.time_ms == 1500
+    assert abs(moved.value - 0.5) < 0.01
+    assert editor.selected_keyframes == {(shape.id, "x", 1500)}
+
+    editor._undo()
+    restored = editor._find_keyframe_target(shape.id)
+    assert [(frame.time_ms, frame.value) for frame in restored.keyframes["x"]] == [
+        (1000, 0.25), (2000, 0.75),
+    ]
+
+
+def test_graph_keyframe_right_click_opens_easing_menu():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    shape = editor.selected
+    shape.add_keyframe("opacity", 1000, 0.4)
+    editor.graph_target_id = shape.id
+    editor.graph_prop = "opacity"
+    editor.timeline_mode = "graph"
+    _, _, timeline = editor.layout()
+    point = editor._graph_point(1000, 0.4, timeline)
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 3, "pos": point},
+    ))
+
+    assert editor.selected_keyframes == {(shape.id, "opacity", 1000)}
+    assert editor.context_menu_pos == point
 
 
 def test_canvas_mode_is_an_undoable_export_setting():

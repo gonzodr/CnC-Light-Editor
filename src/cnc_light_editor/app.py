@@ -14,7 +14,7 @@ from .engine import point_inside, render_leds, sample_gradient
 from .effect_importer import ImportedEffect, load_effect_data
 from .exporter import export_arduino_header
 from .ledmap import Led, LedMap
-from .model import GradientStop, Layer, Project, RandomLedEffect, Shape
+from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "projects" / "current.cnclight"
@@ -40,6 +40,10 @@ TIMELINE_PROPERTY_LABELS = {
     "gradient_type": "Gradient type", "gradient_radial_mode": "Radial mode",
     "gradient_angle": "Gradient angle", "visible": "Visibility",
     "enabled": "Enabled",
+}
+GRAPH_NUMERIC_PROPERTIES = {
+    "x", "y", "width", "height", "rotation", "opacity",
+    "stroke_width", "gradient_angle",
 }
 
 
@@ -108,6 +112,11 @@ class Editor:
         self.timeline_scroll_ms = 0.0
         self.timeline_layer_scroll = 0
         self.timeline_expanded_layers: set[str] = set()
+        self.timeline_mode = "dope"
+        self.graph_target_id: str | None = None
+        self.graph_prop: str | None = None
+        self.graph_drag_records: list[tuple[Shape, str, Keyframe, int, float]] = []
+        self.graph_drag_value_range: tuple[float, float] | None = None
         self.undo_stack: list[Project] = []
         self.redo_stack: list[Project] = []
         self.change_snapshot: Project | None = None
@@ -230,6 +239,16 @@ class Editor:
             if event.button == 3:
                 self.context_menu_pos = None
                 if timeline.collidepoint(event.pos) and not self._active_imported_effect():
+                    if self.timeline_mode == "graph":
+                        keys = self._pick_graph_key(event.pos, timeline)
+                        if keys:
+                            if pygame.key.get_mods() & pygame.KMOD_CTRL:
+                                self.selected_keyframes.symmetric_difference_update(keys)
+                            elif not self.selected_keyframes.intersection(keys):
+                                self.selected_keyframes = keys
+                            if self.selected_keyframes:
+                                self.context_menu_pos = event.pos
+                        return
                     self.drag_mode = "keyframe_marquee"
                     self.drag_origin = event.pos
                     self.keyframe_marquee_current = event.pos
@@ -290,9 +309,26 @@ class Editor:
                         self._action(action)
                     return
             if timeline.collidepoint(event.pos):
+                if self.timeline_mode == "graph" and not self._active_imported_effect():
+                    keys = self._pick_graph_key(event.pos, timeline)
+                    if keys:
+                        if pygame.key.get_mods() & pygame.KMOD_CTRL:
+                            if self.selected_keyframes.intersection(keys):
+                                self.selected_keyframes.difference_update(keys)
+                                return
+                            self.selected_keyframes.update(keys)
+                        elif not self.selected_keyframes.intersection(keys):
+                            self.selected_keyframes = keys
+                        self._start_graph_drag(keys, event.pos)
+                    else:
+                        self.selected_keyframes.clear()
+                        self.drag_mode = "playhead"
+                        self._set_playhead(event.pos[0], timeline)
+                    return
                 keys = self._pick_keyframe_keys(event.pos, timeline)
                 if keys:
                     key_time = next(iter(keys))[2]
+                    self._remember_graph_channel(keys)
                     if pygame.key.get_mods() & pygame.KMOD_CTRL:
                         if self.selected_keyframes.intersection(keys):
                             self.selected_keyframes.difference_update(keys)
@@ -360,6 +396,8 @@ class Editor:
                 if self.drag_layer_index is not None:
                     self._drop_layer(event.pos, panel)
                     self.drag_layer_index = None
+                if self.drag_mode == "graph_keyframe":
+                    self._finish_graph_drag()
                 open_stroke_input = (
                     self.drag_mode == "scrub"
                     and self.scrub_prop == "stroke_width"
@@ -395,6 +433,8 @@ class Editor:
                 self._set_playhead(event.pos[0], timeline)
             elif self.drag_mode == "keyframe" and self.drag_key_time is not None:
                 self._move_keyframe(event.pos[0], timeline)
+            elif self.drag_mode == "graph_keyframe":
+                self._move_graph_keyframes(event.pos, timeline)
             elif self.drag_mode == "keyframe_marquee":
                 self.keyframe_marquee_current = event.pos
             elif self.drag_mode == "duration":
@@ -418,7 +458,10 @@ class Editor:
                     timeline.x, self._timeline_track(timeline).y,
                     180, self._timeline_track(timeline).height,
                 )
-                if layer_column.collidepoint(mouse) and not self._active_imported_effect():
+                if (
+                    self.timeline_mode == "dope" and layer_column.collidepoint(mouse)
+                    and not self._active_imported_effect()
+                ):
                     self._scroll_timeline_layers(-event.y, timeline)
                 elif pygame.key.get_mods() & pygame.KMOD_SHIFT:
                     visible_ms = self._playback_duration() / self.timeline_zoom
@@ -608,6 +651,17 @@ class Editor:
         elif action == "snap":
             self.snap = not self.snap
             self.status = f"Snapping {'on' if self.snap else 'off'}"
+        elif action == "toggle_timeline_mode":
+            if self._active_imported_effect():
+                self.status = "Graph Editor is available for project keyframes"
+            elif self.timeline_mode == "graph":
+                self.timeline_mode = "dope"
+                self.status = "Dope Sheet"
+            elif self._choose_graph_channel():
+                self.timeline_mode = "graph"
+                self.status = f"Graph Editor: {TIMELINE_PROPERTY_LABELS[self.graph_prop]}"
+            else:
+                self.status = "Select an animated numeric property for Graph Editor"
         elif action == "gradient_editor" and self.selected:
             if len(self.selected.gradient_stops) < 2:
                 self._begin_change()
@@ -869,8 +923,8 @@ class Editor:
             self.active_layer = index
             self._ensure_active_layer_visible()
             self.status = f"Timeline layer {layer.name}: {state}"
-        elif action.startswith("select_timeline_target:"):
-            target_id = action.split(":", 1)[1]
+        elif action.startswith("select_timeline_channel:"):
+            _prefix, target_id, prop = action.split(":", 2)
             target = self._find_keyframe_target(target_id)
             layer_index = next(
                 (
@@ -889,6 +943,14 @@ class Editor:
                     self.selected = None
                     self.random_led_editor_open = True
                 self.selected_keyframes.clear()
+                if isinstance(target, Shape) and prop in GRAPH_NUMERIC_PROPERTIES:
+                    self.graph_target_id = target.id
+                    self.graph_prop = prop
+                self.status = f"Timeline channel: {target.name} · {TIMELINE_PROPERTY_LABELS.get(prop, prop)}"
+        elif action.startswith("select_timeline_target:"):
+            target_id = action.split(":", 1)[1]
+            target = self._find_keyframe_target(target_id)
+            if target:
                 self.status = f"Timeline target: {target.name}"
         elif action.startswith("select_layer:"):
             self.active_layer = int(action.split(":")[1])
@@ -1089,6 +1151,193 @@ class Editor:
 
     def _timeline_row_target(self, row: TimelineRow) -> Shape | RandomLedEffect | None:
         return self._find_keyframe_target(row.target_id) if row.target_id else None
+
+    def _choose_graph_channel(self) -> bool:
+        candidates: list[tuple[str, str]] = []
+        if self.graph_target_id and self.graph_prop:
+            candidates.append((self.graph_target_id, self.graph_prop))
+        candidates.extend(
+            (target_id, prop)
+            for target_id, prop, _time_ms in sorted(self.selected_keyframes)
+        )
+        if self.selected:
+            candidates.extend((self.selected.id, prop) for prop in self.selected.keyframes)
+        candidates.extend(
+            (shape.id, prop)
+            for layer in self.project.layers
+            for shape in layer.shapes
+            for prop in shape.keyframes
+        )
+        for target_id, prop in candidates:
+            target = self._find_keyframe_target(target_id)
+            frames = target.keyframes.get(prop, []) if isinstance(target, Shape) else []
+            if (
+                prop in GRAPH_NUMERIC_PROPERTIES and frames
+                and all(isinstance(frame.value, (int, float)) and not isinstance(frame.value, bool) for frame in frames)
+            ):
+                self.graph_target_id = target_id
+                self.graph_prop = prop
+                return True
+        self.graph_target_id = None
+        self.graph_prop = None
+        return False
+
+    def _remember_graph_channel(self, keys: set[tuple[str, str, int]]) -> None:
+        channels = {(target_id, prop) for target_id, prop, _time_ms in keys}
+        if len(channels) != 1:
+            return
+        target_id, prop = next(iter(channels))
+        target = self._find_keyframe_target(target_id)
+        if isinstance(target, Shape) and prop in GRAPH_NUMERIC_PROPERTIES:
+            self.graph_target_id = target_id
+            self.graph_prop = prop
+
+    def _graph_channel(self) -> tuple[Shape, str] | None:
+        target = self._find_keyframe_target(self.graph_target_id) if self.graph_target_id else None
+        if (
+            isinstance(target, Shape) and self.graph_prop in GRAPH_NUMERIC_PROPERTIES
+            and target.keyframes.get(self.graph_prop)
+        ):
+            return target, self.graph_prop
+        return None
+
+    def _graph_area(self, timeline: pygame.Rect) -> pygame.Rect:
+        track = self._timeline_track(timeline)
+        return pygame.Rect(track.x + 1, track.y + 8, track.width - 2, max(40, track.height - 38))
+
+    @staticmethod
+    def _graph_value_range(target: Shape, prop: str) -> tuple[float, float]:
+        fixed = {
+            "x": (0.0, 1.0), "y": (0.0, 1.0), "opacity": (0.0, 1.0),
+            "rotation": (0.0, 360.0), "gradient_angle": (0.0, 360.0),
+            "stroke_width": (0.0, 0.05),
+        }
+        if prop in fixed:
+            return fixed[prop]
+        values = [float(getattr(target, prop))] + [
+            float(frame.value) for frame in target.keyframes.get(prop, [])
+        ]
+        low, high = min(values), max(values)
+        if math.isclose(low, high):
+            padding = max(0.05, abs(low) * 0.35)
+        else:
+            padding = (high - low) * 0.16
+        return max(0.0, low - padding), high + padding
+
+    def _graph_point(
+        self, time_ms: int, value: float, timeline: pygame.Rect,
+        value_range: tuple[float, float] | None = None,
+    ) -> tuple[int, int]:
+        channel = self._graph_channel()
+        if not channel:
+            return self._timeline_track(timeline).topleft
+        low, high = value_range or self._graph_value_range(*channel)
+        area = self._graph_area(timeline)
+        ratio = (float(value) - low) / max(0.000001, high - low)
+        return (
+            round(self._time_to_timeline_x(time_ms, timeline)),
+            round(area.bottom - max(0.0, min(1.0, ratio)) * area.height),
+        )
+
+    def _pick_graph_key(
+        self, pos: tuple[int, int], timeline: pygame.Rect
+    ) -> set[tuple[str, str, int]]:
+        channel = self._graph_channel()
+        if not channel:
+            return set()
+        target, prop = channel
+        value_range = self._graph_value_range(target, prop)
+        candidates = []
+        start, end = self._timeline_window()
+        for frame in target.keyframes.get(prop, []):
+            if start <= frame.time_ms <= end:
+                point = self._graph_point(frame.time_ms, float(frame.value), timeline, value_range)
+                candidates.append((pygame.Vector2(pos).distance_to(point), frame.time_ms))
+        if not candidates:
+            return set()
+        distance, time_ms = min(candidates)
+        return {(target.id, prop, time_ms)} if distance <= 11 else set()
+
+    def _start_graph_drag(
+        self, keys: set[tuple[str, str, int]], pos: tuple[int, int]
+    ) -> None:
+        channel = self._graph_channel()
+        if not channel or not keys:
+            return
+        target, prop = channel
+        clicked_time = next(iter(keys))[2]
+        selected_channel = {
+            key for key in self.selected_keyframes
+            if key[0] == target.id and key[1] == prop
+        }
+        self.selected_keyframes = selected_channel if selected_channel.intersection(keys) else keys
+        self.graph_drag_records = []
+        for _target_id, _prop, time_ms in sorted(self.selected_keyframes, key=lambda item: item[2]):
+            frame = next(
+                (item for item in target.keyframes[prop] if item.time_ms == time_ms),
+                None,
+            )
+            if frame and isinstance(frame.value, (int, float)) and not isinstance(frame.value, bool):
+                self.graph_drag_records.append((target, prop, frame, time_ms, float(frame.value)))
+        self.drag_mode = "graph_keyframe"
+        self.drag_origin = pos
+        self.drag_key_time = clicked_time
+        self.graph_drag_value_range = self._graph_value_range(target, prop)
+        self._begin_change()
+
+    def _move_graph_keyframes(self, pos: tuple[int, int], timeline: pygame.Rect) -> None:
+        channel = self._graph_channel()
+        if not channel or not self.graph_drag_records or self.drag_key_time is None:
+            return
+        target, prop = channel
+        new_anchor = self._timeline_x_to_time(pos[0], timeline)
+        start, end = self._timeline_window()
+        if self.snap or self._timeline_uses_frame_ruler(timeline, end - start):
+            new_anchor = self._snap_time_to_frame(new_anchor)
+        delta_time = new_anchor - self.drag_key_time
+        original_times = [item[3] for item in self.graph_drag_records]
+        delta_time = max(
+            -min(original_times),
+            min(self.project.duration_ms - max(original_times), delta_time),
+        )
+        low, high = self.graph_drag_value_range or self._graph_value_range(target, prop)
+        area = self._graph_area(timeline)
+        delta_value = -(pos[1] - self.drag_origin[1]) / max(1, area.height) * (high - low)
+        limits = {
+            "x": (0.0, 1.0), "y": (0.0, 1.0), "opacity": (0.0, 1.0),
+            "width": (0.01, 5.0), "height": (0.01, 5.0),
+            "rotation": (0.0, 360.0), "gradient_angle": (0.0, 360.0),
+            "stroke_width": (0.001, 0.05),
+        }
+        minimum, maximum = limits[prop]
+        updated: set[tuple[str, str, int]] = set()
+        for _target, _prop, frame, original_time, original_value in self.graph_drag_records:
+            frame.time_ms = original_time + delta_time
+            frame.value = round(max(minimum, min(maximum, original_value + delta_value)), 6)
+            updated.add((target.id, prop, frame.time_ms))
+        target.keyframes[prop].sort(key=lambda frame: frame.time_ms)
+        self.selected_keyframes = updated
+        self.current_ms = self.drag_key_time + delta_time
+
+    def _finish_graph_drag(self) -> None:
+        channel = self._graph_channel()
+        if channel and self.graph_drag_records:
+            target, prop = channel
+            selected_frames = {id(item[2]) for item in self.graph_drag_records}
+            selected_by_time = {
+                frame.time_ms: frame for frame in target.keyframes[prop]
+                if id(frame) in selected_frames
+            }
+            unselected_by_time = {
+                frame.time_ms: frame for frame in target.keyframes[prop]
+                if id(frame) not in selected_frames and frame.time_ms not in selected_by_time
+            }
+            target.keyframes[prop] = sorted(
+                [*unselected_by_time.values(), *selected_by_time.values()],
+                key=lambda frame: frame.time_ms,
+            )
+        self.graph_drag_records.clear()
+        self.graph_drag_value_range = None
 
     def _timeline_visible_rows(
         self, timeline: pygame.Rect
@@ -1591,6 +1840,7 @@ class Editor:
         self.imported_effects = load_effect_data(path)
         self.effect_data_path = path
         self.active_import_index = 0
+        self.timeline_mode = "dope"
         self.current_ms = 0
         self.timeline_scroll_ms = 0
         self.timeline_zoom = 1.0
@@ -1632,6 +1882,9 @@ class Editor:
         self.timeline_scroll_ms = 0.0
         self.timeline_layer_scroll = 0
         self.timeline_expanded_layers.clear()
+        self.timeline_mode = "dope"
+        self.graph_target_id = None
+        self.graph_prop = None
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.change_snapshot = None
@@ -2355,6 +2608,97 @@ class Editor:
         pixels_per_frame = track.width * self._timeline_frame_ms() / max(1.0, visible_ms)
         return self._active_imported_effect() is not None or pixels_per_frame >= 18
 
+    def _draw_graph_editor(
+        self, timeline: pygame.Rect, start: float, end: float
+    ) -> None:
+        track = self._timeline_track(timeline)
+        area = self._graph_area(timeline)
+        channel = self._graph_channel()
+        if not channel and self._choose_graph_channel():
+            channel = self._graph_channel()
+        if not channel:
+            message = self.font.render(
+                "Select an animated numeric property in the Dope Sheet",
+                True, (153, 161, 180),
+            )
+            self.screen.blit(message, message.get_rect(center=area.center))
+            return
+
+        target, prop = channel
+        low, high = self._graph_value_range(target, prop)
+        pygame.draw.rect(self.screen, (19, 22, 29), area)
+        for index in range(5):
+            ratio = index / 4
+            y = round(area.bottom - ratio * area.height)
+            value = low + ratio * (high - low)
+            pygame.draw.line(self.screen, (49, 55, 68), (area.x, y), (area.right, y), 1)
+            value_text = f"{value:.3f}" if abs(high - low) <= 10 else f"{value:.1f}"
+            rendered = self.small.render(value_text, True, (111, 122, 143))
+            self.screen.blit(rendered, (track.x - rendered.get_width() - 8, y - 7))
+
+        current_value = float(target.value_at(prop, self.current_ms))
+        current_y = self._graph_point(self.current_ms, current_value, timeline, (low, high))[1]
+        pygame.draw.line(
+            self.screen, (51, 91, 114), (area.x, current_y), (area.right, current_y), 1,
+        )
+
+        sample_count = max(80, min(360, track.width // 3))
+        curve_points = []
+        for index in range(sample_count + 1):
+            ratio = index / sample_count
+            time_ms = round(start + ratio * (end - start))
+            value = float(target.value_at(prop, time_ms))
+            curve_points.append(self._graph_point(time_ms, value, timeline, (low, high)))
+        if len(curve_points) >= 2:
+            pygame.draw.lines(self.screen, (82, 202, 255), False, curve_points, 2)
+
+        frames = target.keyframes[prop]
+        for before, after in zip(frames, frames[1:]):
+            midpoint = (before.time_ms + after.time_ms) // 2
+            if not start <= midpoint <= end:
+                continue
+            label = {
+                "linear": "LIN", "ease_in": "IN", "ease_out": "OUT",
+                "ease_in_out": "IN/OUT",
+            }.get(after.easing, after.easing.upper())
+            x = round(self._time_to_timeline_x(midpoint, timeline))
+            badge = self.small.render(label, True, (119, 170, 202))
+            self.screen.blit(badge, (x - badge.get_width() // 2, area.y + 4))
+
+        for frame in frames:
+            if not start <= frame.time_ms <= end:
+                continue
+            point = self._graph_point(frame.time_ms, float(frame.value), timeline, (low, high))
+            key = (target.id, prop, frame.time_ms)
+            selected = key in self.selected_keyframes
+            pygame.draw.circle(self.screen, (245, 248, 255) if selected else (255, 202, 70), point, 7)
+            pygame.draw.circle(self.screen, ACCENT if selected else (96, 72, 25), point, 7, 2)
+
+        channel_name = TIMELINE_PROPERTY_LABELS.get(prop, prop.replace("_", " ").title())
+        title = f"{target.name} · {channel_name}"
+        while len(title) > 6 and self.small.size(title)[0] > 164:
+            title = title[:-4] + "..."
+        self.screen.blit(self.small.render(title, True, (218, 226, 239)), (timeline.x + 8, track.y + 7))
+        value_label = self.small.render(f"Now {current_value:.3f}", True, (91, 203, 255))
+        self.screen.blit(value_label, (timeline.x + 8, track.y + 28))
+        self.screen.blit(
+            self.small.render("Drag point: time + value", True, (122, 132, 151)),
+            (timeline.x + 8, track.y + 51),
+        )
+
+        play_x = round(self._time_to_timeline_x(self.current_ms, timeline))
+        if track.x <= play_x <= track.right:
+            pygame.draw.polygon(
+                self.screen, (255, 83, 72),
+                [(play_x - 6, timeline.y + 20), (play_x + 6, timeline.y + 20), (play_x, timeline.y + 29)],
+            )
+            pygame.draw.line(
+                self.screen, (255, 83, 72),
+                (play_x, timeline.y + 24), (play_x, track.bottom), 2,
+            )
+        hint = "Graph Editor • drag points in 2D • right-click: easing/delete • wheel: time zoom"
+        self.screen.blit(self.small.render(hint, True, (132, 139, 155)), (track.x, timeline.bottom - 22))
+
     def _draw_leds(self, canvas: pygame.Rect, stencil_back: bool = False) -> None:
         colors = self._preview_led_colors()
         radius = max(3, min(9, canvas.width // 90))
@@ -2402,13 +2746,19 @@ class Editor:
         pygame.draw.rect(self.screen, (22, 24, 30), track)
         pygame.draw.line(self.screen, (68, 73, 87), (track.x, track.y), (track.x, track.bottom))
 
+        imported = self._active_imported_effect()
         start, end = self._timeline_window()
         visible_ms = end - start
         frame_ruler = self._timeline_uses_frame_ruler(rect, visible_ms)
         frame_ms = self._timeline_frame_ms()
-        self.screen.blit(self.font.render("TIMELINE", True, (220, 224, 234)), (rect.x + 12, rect.y + 9))
+        self.screen.blit(self.small.render("TIMELINE", True, (220, 224, 234)), (rect.x + 8, rect.y + 12))
+        self._button(
+            pygame.Rect(rect.x + 70, rect.y + 5, 50, 25),
+            "toggle_timeline_mode", "DOPE" if self.timeline_mode == "graph" else "GRAPH",
+            self.timeline_mode == "graph",
+        )
         timecode = f"F{int(self.current_ms // frame_ms):03d}" if frame_ruler else f"{self.current_ms / 1000:05.2f}s"
-        self.screen.blit(self.font.render(timecode, True, (108, 180, 255)), (rect.x + 102, rect.y + 9))
+        self.screen.blit(self.small.render(timecode, True, (108, 180, 255)), (rect.x + 126, rect.y + 12))
         if frame_ruler:
             grid_text = (
                 f"FRAME GRID  •  {frame_ms:g} ms  •  {self.timeline_zoom:.1f}x"
@@ -2445,8 +2795,13 @@ class Editor:
                 self.screen.blit(self.small.render(f"{tick / 1000:g}s", True, (145, 151, 166)), (x + 4, rect.y + 8))
                 tick += tick_ms
 
+        if self.timeline_mode == "graph" and not imported:
+            self._draw_graph_editor(rect, start, end)
+            pygame.draw.rect(self.screen, (29, 32, 40), zoom_rect, border_radius=3)
+            self.screen.blit(zoom_label, zoom_label.get_rect(center=zoom_rect.center))
+            return
+
         row_y = track.y + 15
-        imported = self._active_imported_effect()
         if imported:
             row = pygame.Rect(rect.x, row_y - 11, rect.width, 31)
             pygame.draw.rect(self.screen, (42, 54, 76), row)
@@ -2537,7 +2892,7 @@ class Editor:
                 self.screen.blit(label, (rect.x + 26, row_y - 3))
                 self.buttons.append((
                     pygame.Rect(rect.x + 8, row_rect.y, 172, row_rect.height),
-                    f"select_timeline_target:{target.id}", property_text,
+                    f"select_timeline_channel:{target.id}:{timeline_row.prop}", property_text,
                 ))
                 base_color = (255, 202, 70) if target_active else (111, 137, 177)
                 base_size = 6
