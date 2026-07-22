@@ -104,6 +104,7 @@ class Editor:
         self.drag_shape_state: dict | None = None
         self.drag_key_time: int | None = None
         self.selected_keyframes: set[tuple[str, str, int]] = set()
+        self.keyframe_clipboard: list[tuple[str, str, int, Keyframe]] = []
         self.context_menu_pos: tuple[int, int] | None = None
         self.keyframe_marquee_current: tuple[int, int] | None = None
         self.keyframe_marquee_additive = False
@@ -518,6 +519,12 @@ class Editor:
             return
         if ctrl and event.key == pygame.K_d:
             self._action("duplicate_layer")
+            return
+        if ctrl and event.key == pygame.K_c:
+            self._copy_selected_keyframes()
+            return
+        if ctrl and event.key == pygame.K_v:
+            self._paste_keyframes_at_playhead()
             return
         if ctrl and event.key == pygame.K_i:
             self._action("import_effect_data")
@@ -1864,18 +1871,91 @@ class Editor:
         if not self.selected_keyframes:
             return
         self._begin_change()
-        for target_id, prop, time_ms in tuple(self.selected_keyframes):
+        grouped: dict[tuple[str, str], set[int]] = {}
+        for target_id, prop, time_ms in self.selected_keyframes:
+            grouped.setdefault((target_id, prop), set()).add(time_ms)
+        for (target_id, prop), deleted_times in grouped.items():
             target = self._find_keyframe_target(target_id)
             if not target or prop not in target.keyframes:
                 continue
-            target.keyframes[prop] = [
-                frame for frame in target.keyframes[prop] if frame.time_ms != time_ms
+            original = target.keyframes[prop]
+            deleted_first = bool(original) and original[0].time_ms in deleted_times
+            remaining = [
+                frame for frame in original if frame.time_ms not in deleted_times
             ]
-            if not target.keyframes[prop]:
+            if remaining:
+                target.keyframes[prop] = remaining
+                if deleted_first:
+                    setattr(target, prop, deepcopy(remaining[0].value))
+            else:
                 del target.keyframes[prop]
         self.selected_keyframes.clear()
         self._commit_change()
         self.status = "Selected keyframe deleted"
+
+    def _copy_selected_keyframes(self) -> None:
+        records: list[tuple[str, str, int, Keyframe]] = []
+        for target_id, prop, time_ms in sorted(
+            self.selected_keyframes, key=lambda key: (key[2], key[0], key[1]),
+        ):
+            target = self._find_keyframe_target(target_id)
+            if not target:
+                continue
+            frame = next(
+                (item for item in target.keyframes.get(prop, []) if item.time_ms == time_ms),
+                None,
+            )
+            if frame:
+                records.append((target_id, prop, time_ms, deepcopy(frame)))
+        if not records:
+            self.status = "Select one or more keyframes to copy"
+            return
+        origin = min(record[2] for record in records)
+        self.keyframe_clipboard = [
+            (target_id, prop, time_ms - origin, frame)
+            for target_id, prop, time_ms, frame in records
+        ]
+        self.status = f"Copied {len(records)} keyframe{'s' if len(records) != 1 else ''}"
+
+    def _paste_keyframes_at_playhead(self) -> None:
+        if not self.keyframe_clipboard:
+            self.status = "Keyframe clipboard is empty"
+            return
+        records = [
+            (target, target_id, prop, offset, frame)
+            for target_id, prop, offset, frame in self.keyframe_clipboard
+            if (target := self._find_keyframe_target(target_id)) is not None
+        ]
+        if not records:
+            self.status = "Copied keyframe targets no longer exist"
+            return
+        last_time = self.current_ms + max(record[3] for record in records)
+        if last_time > 15000:
+            self.status = "Paste would exceed the 15 second timeline limit"
+            return
+
+        self._begin_change()
+        if last_time > self.project.duration_ms:
+            self.project.duration_ms = math.ceil(last_time / 100.0) * 100
+            self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
+            self._clamp_timeline_scroll()
+        pasted: set[tuple[str, str, int]] = set()
+        for target, target_id, prop, offset, source in records:
+            time_ms = self.current_ms + offset
+            frame = deepcopy(source)
+            frame.time_ms = time_ms
+            frames = [
+                existing for existing in target.keyframes.get(prop, [])
+                if existing.time_ms != time_ms
+            ]
+            frames.append(frame)
+            frames.sort(key=lambda item: item.time_ms)
+            target.keyframes[prop] = frames
+            pasted.add((target_id, prop, time_ms))
+        self.selected_keyframes = pasted
+        self._remember_graph_channel(pasted)
+        self._commit_change()
+        self.status = f"Pasted {len(pasted)} keyframe{'s' if len(pasted) != 1 else ''} at playhead"
 
     def _apply_keyframe_context(self, action: str) -> None:
         if action == "delete":

@@ -87,6 +87,77 @@ def test_selected_keyframe_delete_keeps_shape_and_undo_restores_diamond():
     assert [frame.time_ms for frame in editor.selected.keyframes["x"]] == [0, 1000]
 
 
+def test_deleting_first_keyframe_promotes_first_remaining_value_to_shape_base():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.width = 0.2
+    editor.selected.add_keyframe("width", 0, 0.1)
+    editor.selected.add_keyframe("width", 1000, 0.8)
+    editor.selected_keyframes = {(editor.selected.id, "width", 0)}
+
+    editor._delete_selected_keyframes()
+
+    assert [frame.time_ms for frame in editor.selected.keyframes["width"]] == [1000]
+    assert editor.selected.width == 0.8
+    assert editor.selected.state_at(0)["width"] == 0.8
+    editor._undo()
+    assert editor.selected.width == 0.2
+    assert editor.selected.state_at(0)["width"] == 0.1
+
+
+def test_ctrl_c_v_pastes_selected_keyframe_at_playhead_and_preserves_easing():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    shape = editor.selected
+    shape.add_keyframe("x", 1000, 0.4)
+    shape.add_keyframe("x", 2500, 0.9)
+    source = shape.keyframes["x"][0]
+    source.easing = "bezier"
+    source.bezier = (0.2, -0.3, 0.8, 1.4)
+    editor.selected_keyframes = {(shape.id, "x", 1000)}
+
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_c, "mod": pygame.KMOD_CTRL, "unicode": "c"},
+    ))
+    editor.current_ms = 2500
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_v, "mod": pygame.KMOD_CTRL, "unicode": "v"},
+    ))
+
+    pasted = next(frame for frame in shape.keyframes["x"] if frame.time_ms == 2500)
+    assert pasted.value == 0.4
+    assert pasted.easing == "bezier"
+    assert pasted.bezier == (0.2, -0.3, 0.8, 1.4)
+    assert editor.selected_keyframes == {(shape.id, "x", 2500)}
+    editor._undo()
+    restored = editor._find_keyframe_target(shape.id)
+    assert next(frame for frame in restored.keyframes["x"] if frame.time_ms == 2500).value == 0.9
+
+
+def test_keyframe_clipboard_preserves_multi_target_offsets_and_extends_timeline():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.4, 0.4))
+    first = editor.selected
+    first.add_keyframe("x", 1000, 0.3)
+    editor._action("layer")
+    editor._create_shape("rectangle", (0.6, 0.6))
+    second = editor.selected
+    second.add_keyframe("opacity", 1600, 0.25)
+    editor.selected_keyframes = {
+        (first.id, "x", 1000), (second.id, "opacity", 1600),
+    }
+
+    editor._copy_selected_keyframes()
+    editor.current_ms = 4800
+    editor._paste_keyframes_at_playhead()
+
+    assert (first.id, "x", 4800) in editor.selected_keyframes
+    assert (second.id, "opacity", 5400) in editor.selected_keyframes
+    assert next(frame for frame in first.keyframes["x"] if frame.time_ms == 4800).value == 0.3
+    assert next(frame for frame in second.keyframes["opacity"] if frame.time_ms == 5400).value == 0.25
+    assert editor.project.duration_ms == 5400
+
+
 def test_context_action_sets_easing_on_selected_keyframe():
     editor = make_editor()
     editor._create_shape("ellipse", (0.5, 0.5))

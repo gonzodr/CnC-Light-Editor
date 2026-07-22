@@ -62,7 +62,9 @@ cnc-light-editor
 - Graph Editor: jelölj ki egy numerikus property-sávot vagy keyframe-et, majd nyomd meg a timeline `GRAPH` gombját. A görbe ugyanazt az interpolációt mutatja, amely az exportba kerül; a pontokat vízszintesen az idő, függőlegesen az érték módosításához húzhatod. Jobb kattintással válaszd a `Custom Bezier` módot a két lila fogantyú megjelenítéséhez; a függőleges fogantyúk túllövéses görbét is engednek. A `DOPE` gombbal válthatsz vissza.
 - Több keyframe kijelölése: jobb egérgombbal húzz kijelölőkeretet a timeline-on, akár több property-sávon és shape-en keresztül; `Ctrl` mellett a találatok hozzáadódnak a meglévő kijelöléshez. `Ctrl` + jobb kattintással egyenként is hozzáadhatsz vagy kivehetsz keyframe-eket.
 - Keyframe-offset: fogd meg bármelyik kijelölt gyémántot; a teljes kijelölés shape-ek és property-k között is együtt mozog, az egymás közötti időeltolás megtartásával.
+- Keyframe másolás: `Ctrl+C` eltárolja az összes kijelölt keyframe-et, a `Ctrl+V` pedig úgy illeszti be őket, hogy a legkorábbi másolat az aktuális playheadhez kerüljön. A shape/property cél, az egymás közötti időeltolás, az easing és a Custom Bezier adatok is megmaradnak; szükség esetén a timeline automatikusan meghosszabbodik legfeljebb 15 másodpercig.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
+- Ha egy property legelső keyframe-jét törlöd, az első megmaradó keyframe értéke lesz az alakzat új alapértéke, ezért a keyframe előtti szakasz nem ugrik vissza egy oda nem illő default állapotra.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
 - Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél az effekt saját `frameMs` értékét használja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
