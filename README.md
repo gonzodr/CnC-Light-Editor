@@ -56,6 +56,15 @@ Az alapértelmezett munkaterület natív `1280×1024`, ezért közvetlenül ille
 cnc-light-editor --resolution 1280x1024 --fullscreen
 ```
 
+Az editor desktop környezet nélkül is futtatható közvetlenül a Pi kijelzőjén. A projekt- és firmware-fájlok megnyitását/mentését saját Pygame fájlböngésző kezeli, ezért nincs `tkinter`, X11 vagy Wayland fájlablak-függőség. KMS/DRM konzolos indításnál az SDL videodriver a Pi beállításától függően például így választható ki:
+
+```bash
+SDL_VIDEODRIVER=kmsdrm SDL_AUDIODRIVER=dummy \
+  cnc-light-editor --resolution 1280x1024 --fullscreen
+```
+
+A beépített fájlböngészőben a Home, Project, Projects, Exports és Root gyorshelyekről lehet indulni; az útvonal és mentési fájlnév kézzel vagy `Ctrl+V`-vel is megadható. Az overwrite és a nem mentett projekt megerősítése szintén az SDL/Pygame felületen történik.
+
 Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a `CNC_LIGHT_EDITOR_RESOLUTION` környezeti változóval állítható. Ablakos módban a felület átméretezhető; a viewport, timeline és Inspector automatikusan újratördelődik, 1280×1024-en pedig a magasabb Inspector több layer-sort jelenít meg.
 
 ## Kezelés

@@ -220,6 +220,25 @@ class Editor:
         self.export_bank_id_input = ""
         self.export_bank_input_select_all = False
         self.export_bank_status = "Map an effect_data.h or export the current project"
+        self.file_browser_open = False
+        self.file_browser_mode = "open"
+        self.file_browser_purpose = ""
+        self.file_browser_title = "Choose file"
+        self.file_browser_directory = ROOT
+        self.file_browser_extension = ""
+        self.file_browser_filename = ""
+        self.file_browser_path_input = str(ROOT)
+        self.file_browser_selected = -1
+        self.file_browser_scroll = 0
+        self.file_browser_path_editing = False
+        self.file_browser_filename_editing = False
+        self.file_browser_input_select_all = False
+        self.file_browser_status = ""
+        self.confirmation_open = False
+        self.confirmation_title = "Confirm"
+        self.confirmation_message = ""
+        self.confirmation_action = ""
+        self.confirmation_payload: object | None = None
         self.active_layer = 0
         self.selected: Shape | None = None
         self.drag_mode: str | None = None
@@ -348,6 +367,14 @@ class Editor:
 
         if self.recovery_open:
             self._handle_recovery_event(event)
+            return
+
+        if self.confirmation_open:
+            self._handle_confirmation_event(event)
+            return
+
+        if self.file_browser_open:
+            self._handle_file_browser_event(event)
             return
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
@@ -2894,34 +2921,24 @@ class Editor:
         self.recovery_open = False
         return True
 
-    def _confirm_replace_project(self, title: str, message: str) -> bool:
-        if not self._project_is_dirty():
-            return True
-        root = None
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            try:
-                root.attributes("-topmost", True)
-            except tk.TclError:
-                pass
-            return bool(messagebox.askyesno(title, message, parent=root))
-        except Exception as error:
-            self.status = f"Confirmation failed: {error}"
-            return False
-        finally:
-            if root is not None:
-                root.destroy()
+    def _request_confirmation(
+        self, title: str, message: str, action: str, payload: object | None = None,
+    ) -> None:
+        self.confirmation_open = True
+        self.confirmation_title = title
+        self.confirmation_message = message
+        self.confirmation_action = action
+        self.confirmation_payload = payload
+        self.playing = False
+        self.status = f"Confirmation required: {title}"
 
     def _new_project(self, confirm: bool = True) -> bool:
-        if confirm and not self._confirm_replace_project(
-            "New project",
-            "The current project has unsaved changes. Discard them and start a new project?",
-        ):
-            self.status = "New project cancelled — current project kept"
+        if confirm and self._project_is_dirty():
+            self._request_confirmation(
+                "New project",
+                "The current project has unsaved changes. Discard them and start a new project?",
+                "new_project",
+            )
             return False
         self._install_project(
             Project("Untitled effect"), None, saved=False, status="New blank project",
@@ -2939,86 +2956,391 @@ class Editor:
             self.status = f"Project save failed: {error}"
 
     def _choose_project_save(self) -> None:
-        root = None
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            try:
-                root.attributes("-topmost", True)
-            except tk.TclError:
-                pass
-            selected = filedialog.asksaveasfilename(
-                title="Save CnC Light project",
-                initialdir=str(PROJECT_FILE.parent),
-                initialfile=self.project_path.name if self.project_path else PROJECT_FILE.name,
-                defaultextension=".cnclight",
-                filetypes=[("CnC Light project", "*.cnclight"), ("All files", "*.*")],
-            )
-            if selected:
-                self.save_project_file(selected)
-            else:
-                self.status = "Project save cancelled"
-        except Exception as error:
-            self.status = f"Project save failed: {error}"
-        finally:
-            if root is not None:
-                root.destroy()
+        default = self.project_path or PROJECT_FILE
+        self._open_file_browser(
+            title="Save CnC Light project",
+            mode="save",
+            purpose="project_save",
+            initial_directory=default.parent,
+            extension=".cnclight",
+            filename=default.name,
+        )
 
     def _choose_project_load(self) -> None:
-        root = None
-        try:
-            import tkinter as tk
-            from tkinter import filedialog, messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            try:
-                root.attributes("-topmost", True)
-            except tk.TclError:
-                pass
-            if self._project_is_dirty() and not messagebox.askyesno(
-                "Unsaved project",
-                "The current project has unsaved changes. Open another project anyway?",
-                parent=root,
-            ):
-                self.status = "Project load cancelled — current project kept"
-                return
-            selected = filedialog.askopenfilename(
-                title="Open CnC Light project",
-                initialdir=str(self.project_path.parent if self.project_path else PROJECT_FILE.parent),
-                filetypes=[("CnC Light project", "*.cnclight"), ("All files", "*.*")],
-            )
-            if selected:
-                self.load_project_file(selected)
-            else:
-                self.status = "Project load cancelled"
-        except Exception as error:
-            self.status = f"Project load failed: {error}"
-        finally:
-            if root is not None:
-                root.destroy()
+        self._open_file_browser(
+            title="Open CnC Light project",
+            mode="open",
+            purpose="project_load",
+            initial_directory=self.project_path.parent if self.project_path else PROJECT_FILE.parent,
+            extension=".cnclight",
+        )
 
     def _choose_effect_data(self) -> None:
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
+        initial = Path(r"F:\Projects\cheech and chong\firmware\CnC_firmware4")
+        if self.effect_data_path:
+            initial = self.effect_data_path.parent
+        self._open_file_browser(
+            title="Open firmware effect_data.h",
+            mode="open",
+            purpose="effect_import",
+            initial_directory=initial if initial.exists() else ROOT,
+            extension=".h",
+        )
 
-            root = tk.Tk()
-            root.withdraw()
-            initial = Path(r"F:\Projects\cheech and chong\firmware\CnC_firmware4")
-            selected = filedialog.askopenfilename(
-                title="Open firmware effect_data.h",
-                initialdir=str(initial if initial.exists() else ROOT),
-                filetypes=[("Arduino header", "*.h"), ("All files", "*.*")],
+    def _open_file_browser(
+        self,
+        *,
+        title: str,
+        mode: str,
+        purpose: str,
+        initial_directory: str | Path,
+        extension: str,
+        filename: str = "",
+    ) -> None:
+        directory = Path(initial_directory).expanduser()
+        if directory.is_file():
+            directory = directory.parent
+        if not directory.is_dir():
+            directory = ROOT if ROOT.is_dir() else Path.cwd()
+        try:
+            directory = directory.resolve()
+        except OSError:
+            directory = Path.cwd()
+        self.file_browser_open = True
+        self.file_browser_mode = mode
+        self.file_browser_purpose = purpose
+        self.file_browser_title = title
+        self.file_browser_directory = directory
+        self.file_browser_extension = extension.lower()
+        self.file_browser_filename = filename
+        self.file_browser_path_input = str(directory)
+        self.file_browser_selected = -1
+        self.file_browser_scroll = 0
+        self.file_browser_path_editing = False
+        self.file_browser_filename_editing = mode == "save"
+        self.file_browser_input_select_all = mode == "save"
+        self.file_browser_status = (
+            f"Showing folders and *{extension} files" if extension else "Choose a file"
+        )
+        self.playing = False
+
+    def _file_browser_entries(self) -> list[Path]:
+        try:
+            children = list(self.file_browser_directory.iterdir())
+        except OSError as error:
+            self.file_browser_status = f"Cannot read folder: {error}"
+            return []
+        extension = self.file_browser_extension
+        visible = [
+            child for child in children
+            if child.is_dir() or not extension or child.suffix.lower() == extension
+        ]
+        return sorted(
+            visible,
+            key=lambda child: (not child.is_dir(), child.name.casefold()),
+        )
+
+    def _file_browser_locations(self) -> list[tuple[str, Path]]:
+        candidates = [
+            ("Home", Path.home()),
+            ("Project", ROOT),
+            ("Projects", PROJECT_FILE.parent),
+            ("Exports", EXPORT_FILE.parent),
+            ("Root", Path(self.file_browser_directory.anchor or os.sep)),
+        ]
+        if os.name == "nt":
+            candidates.extend(
+                (f"{chr(code)}:", Path(f"{chr(code)}:\\"))
+                for code in range(ord("A"), ord("Z") + 1)
             )
-            root.destroy()
-            if selected:
-                self.load_effect_data_file(selected)
-        except Exception as error:
-            self.status = f"Effect import failed: {error}"
+        locations: list[tuple[str, Path]] = []
+        seen: set[str] = set()
+        for label, path in candidates:
+            try:
+                resolved = path.expanduser().resolve()
+            except OSError:
+                continue
+            key = os.path.normcase(str(resolved))
+            if key in seen or not resolved.is_dir():
+                continue
+            seen.add(key)
+            locations.append((label, resolved))
+        return locations
+
+    def _navigate_file_browser(self, directory: str | Path) -> bool:
+        target = Path(directory).expanduser()
+        try:
+            target = target.resolve()
+        except OSError as error:
+            self.file_browser_status = f"Invalid path: {error}"
+            return False
+        if not target.is_dir():
+            self.file_browser_status = "That path is not an accessible folder"
+            return False
+        self.file_browser_directory = target
+        self.file_browser_path_input = str(target)
+        self.file_browser_selected = -1
+        self.file_browser_scroll = 0
+        self.file_browser_path_editing = False
+        self.file_browser_status = f"Opened {target.name or target}"
+        return True
+
+    def _cancel_file_browser(self) -> None:
+        purpose = self.file_browser_purpose
+        self.file_browser_open = False
+        self.file_browser_path_editing = False
+        self.file_browser_filename_editing = False
+        if purpose.startswith("bank_"):
+            self.export_bank_status = "File selection cancelled"
+        else:
+            self.status = "File selection cancelled"
+
+    def _selected_file_browser_path(self) -> Path | None:
+        entries = self._file_browser_entries()
+        if 0 <= self.file_browser_selected < len(entries):
+            return entries[self.file_browser_selected]
+        return None
+
+    def _activate_file_browser_selection(self, *, accept_file: bool = True) -> None:
+        selected = self._selected_file_browser_path()
+        if selected is None:
+            if self.file_browser_mode == "save" and accept_file:
+                self._accept_file_browser()
+            return
+        if selected.is_dir():
+            self._navigate_file_browser(selected)
+            return
+        self.file_browser_filename = selected.name
+        if self.file_browser_mode == "open" and accept_file:
+            self._accept_file_browser()
+
+    def _file_browser_target(self) -> Path | None:
+        if self.file_browser_mode == "open":
+            selected = self._selected_file_browser_path()
+            if selected is None or not selected.is_file():
+                self.file_browser_status = "Select a file first"
+                return None
+            return selected
+        filename = self.file_browser_filename.strip()
+        if not filename:
+            self.file_browser_status = "Enter a file name"
+            return None
+        target = self.file_browser_directory / filename
+        if self.file_browser_extension and target.suffix.lower() != self.file_browser_extension:
+            target = target.with_suffix(self.file_browser_extension)
+        return target
+
+    def _accept_file_browser(self, *, overwrite_confirmed: bool = False) -> bool:
+        target = self._file_browser_target()
+        if target is None:
+            return False
+        if (
+            self.file_browser_mode == "save"
+            and target.exists()
+            and not overwrite_confirmed
+        ):
+            purpose = self.file_browser_purpose
+            self.file_browser_open = False
+            self._request_confirmation(
+                "Replace existing file?",
+                f"{target.name} already exists. Replace it?",
+                "complete_file_browser",
+                (purpose, target),
+            )
+            return False
+        return self._complete_file_browser_path(self.file_browser_purpose, target)
+
+    def _complete_file_browser_path(self, purpose: str, target: Path) -> bool:
+        try:
+            if purpose == "project_save":
+                self.save_project_file(target)
+            elif purpose == "project_load":
+                if self._project_is_dirty():
+                    self.file_browser_open = False
+                    self._request_confirmation(
+                        "Unsaved project",
+                        "The current project has unsaved changes. Open another project anyway?",
+                        "load_project",
+                        target,
+                    )
+                    return False
+                self.load_project_file(target)
+            elif purpose == "effect_import":
+                self.load_effect_data_file(target)
+            elif purpose == "bank_map":
+                self.map_effect_bank_file(target)
+            elif purpose == "bank_export":
+                self.export_effect_bank_file(target)
+            else:
+                raise ValueError(f"Unknown file operation: {purpose}")
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            self.file_browser_open = True
+            self.file_browser_status = f"Operation failed: {error}"
+            if purpose.startswith("bank_"):
+                self.export_bank_status = self.file_browser_status
+            else:
+                self.status = self.file_browser_status
+            return False
+        self.file_browser_open = False
+        self.file_browser_path_editing = False
+        self.file_browser_filename_editing = False
+        return True
+
+    def _handle_file_browser_event(self, event: pygame.event.Event) -> None:
+        entries = self._file_browser_entries()
+        if event.type == pygame.KEYDOWN:
+            if self.file_browser_path_editing or self.file_browser_filename_editing:
+                self._handle_file_browser_text_input(event)
+                return
+            if event.key == pygame.K_ESCAPE:
+                self._cancel_file_browser()
+            elif event.key == pygame.K_BACKSPACE:
+                self._navigate_file_browser(self.file_browser_directory.parent)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self._activate_file_browser_selection()
+            elif event.key in (pygame.K_UP, pygame.K_DOWN):
+                delta = -1 if event.key == pygame.K_UP else 1
+                self.file_browser_selected = max(
+                    0, min(max(0, len(entries) - 1), self.file_browser_selected + delta)
+                )
+            return
+        if event.type == pygame.MOUSEWHEEL:
+            panel = self._file_browser_panel_rect()
+            list_rect = self._file_browser_list_rect(panel)
+            mouse = getattr(event, "pos", pygame.mouse.get_pos())
+            if list_rect.collidepoint(mouse):
+                visible = max(1, list_rect.height // 38)
+                maximum = max(0, len(entries) - visible)
+                self.file_browser_scroll = max(
+                    0, min(maximum, self.file_browser_scroll - event.y * 3)
+                )
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        action = next((
+            action for rect, action, _label in reversed(self.buttons)
+            if action.startswith("file_browser_") and rect.collidepoint(event.pos)
+        ), None)
+        if not action:
+            return
+        if action == "file_browser_cancel":
+            self._cancel_file_browser()
+        elif action == "file_browser_accept":
+            self._accept_file_browser()
+        elif action == "file_browser_up":
+            self._navigate_file_browser(self.file_browser_directory.parent)
+        elif action == "file_browser_path":
+            self.file_browser_path_editing = True
+            self.file_browser_filename_editing = False
+            self.file_browser_path_input = str(self.file_browser_directory)
+            self.file_browser_input_select_all = True
+        elif action == "file_browser_filename":
+            self.file_browser_filename_editing = True
+            self.file_browser_path_editing = False
+            self.file_browser_input_select_all = True
+        elif action.startswith("file_browser_location:"):
+            index = int(action.rsplit(":", 1)[1])
+            locations = self._file_browser_locations()
+            if 0 <= index < len(locations):
+                self._navigate_file_browser(locations[index][1])
+        elif action.startswith("file_browser_entry:"):
+            index = int(action.rsplit(":", 1)[1])
+            self.file_browser_selected = index
+            selected = self._selected_file_browser_path()
+            if selected and selected.is_dir():
+                self._navigate_file_browser(selected)
+            elif selected:
+                self.file_browser_filename = selected.name
+                if getattr(event, "clicks", 1) >= 2:
+                    self._activate_file_browser_selection()
+
+    def _handle_file_browser_text_input(self, event: pygame.event.Event) -> None:
+        path_field = self.file_browser_path_editing
+        value = self.file_browser_path_input if path_field else self.file_browser_filename
+        ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
+        if ctrl and event.key == pygame.K_a:
+            self.file_browser_input_select_all = True
+            return
+        if ctrl and event.key == pygame.K_v:
+            pasted = self._clipboard_text().replace("\r", "").replace("\n", "")
+            value = pasted if self.file_browser_input_select_all else value + pasted
+            self.file_browser_input_select_all = False
+        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if path_field:
+                self._navigate_file_browser(value)
+            else:
+                self.file_browser_filename_editing = False
+                self._accept_file_browser()
+            return
+        elif event.key == pygame.K_ESCAPE:
+            self.file_browser_path_editing = False
+            self.file_browser_filename_editing = False
+            self.file_browser_input_select_all = False
+            return
+        elif event.key == pygame.K_BACKSPACE:
+            value = "" if self.file_browser_input_select_all else value[:-1]
+            self.file_browser_input_select_all = False
+        else:
+            character = getattr(event, "unicode", "")
+            if character.isprintable():
+                value = character if self.file_browser_input_select_all else value + character
+                self.file_browser_input_select_all = False
+        if path_field:
+            self.file_browser_path_input = value[:500]
+        else:
+            self.file_browser_filename = value[:160]
+
+    def _handle_confirmation_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_ESCAPE, pygame.K_n):
+                self._resolve_confirmation(False)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_y):
+                self._resolve_confirmation(True)
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        action = next((
+            action for rect, action, _label in reversed(self.buttons)
+            if action.startswith("confirmation_") and rect.collidepoint(event.pos)
+        ), None)
+        if action == "confirmation_yes":
+            self._resolve_confirmation(True)
+        elif action == "confirmation_no":
+            self._resolve_confirmation(False)
+
+    def _resolve_confirmation(self, accepted: bool) -> None:
+        action = self.confirmation_action
+        payload = self.confirmation_payload
+        self.confirmation_open = False
+        self.confirmation_action = ""
+        self.confirmation_payload = None
+        if not accepted:
+            self.status = "Operation cancelled — current project kept"
+            if action == "complete_file_browser" and isinstance(payload, tuple):
+                purpose, target = payload
+                self._open_file_browser(
+                    title=self.file_browser_title,
+                    mode="save",
+                    purpose=str(purpose),
+                    initial_directory=Path(target).parent,
+                    extension=Path(target).suffix,
+                    filename=Path(target).name,
+                )
+                self.file_browser_status = "Choose another name or cancel"
+            return
+        if action == "new_project":
+            self._new_project(confirm=False)
+        elif action == "load_project" and isinstance(payload, Path):
+            try:
+                self.load_project_file(payload)
+            except (OSError, TypeError, ValueError, KeyError) as error:
+                self.status = f"Project load failed: {error}"
+        elif action == "load_bank_project" and isinstance(payload, int):
+            self.export_bank_selected = payload
+            self._load_export_bank_project(confirm=False)
+        elif action == "complete_file_browser" and isinstance(payload, tuple):
+            purpose, target = payload
+            self._complete_file_browser_path(str(purpose), Path(target))
 
     def _open_export_bank(self) -> None:
         self.export_bank_open = True
@@ -3063,55 +3385,24 @@ class Editor:
         return destination
 
     def _choose_export_bank_map(self) -> None:
-        root = None
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            selected = filedialog.askopenfilename(
-                title="Map firmware effect_data.h",
-                initialdir=str(self.export_bank_path.parent if self.export_bank_path else ROOT),
-                filetypes=[("Arduino header", "*.h"), ("All files", "*.*")],
-            )
-            if selected:
-                self.map_effect_bank_file(selected)
-            else:
-                self.export_bank_status = "Header mapping cancelled"
-        except Exception as error:
-            self.export_bank_status = f"Mapping failed: {error}"
-        finally:
-            if root is not None:
-                root.destroy()
+        self._open_file_browser(
+            title="Map firmware effect_data.h",
+            mode="open",
+            purpose="bank_map",
+            initial_directory=self.export_bank_path.parent if self.export_bank_path else ROOT,
+            extension=".h",
+        )
 
     def _choose_export_bank_save(self) -> None:
-        root = None
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            default = self.export_bank_path or EXPORT_FILE
-            selected = filedialog.asksaveasfilename(
-                title="Export V4 effect bank",
-                initialdir=str(default.parent),
-                initialfile=default.name,
-                defaultextension=".h",
-                filetypes=[("Arduino header", "*.h"), ("All files", "*.*")],
-            )
-            if selected:
-                self.export_effect_bank_file(selected)
-            else:
-                self.export_bank_status = "Effect bank export cancelled"
-        except (OSError, ValueError) as error:
-            self.export_bank_status = f"Export blocked: {error}"
-        except Exception as error:
-            self.export_bank_status = f"Export failed: {error}"
-        finally:
-            if root is not None:
-                root.destroy()
+        default = self.export_bank_path or EXPORT_FILE
+        self._open_file_browser(
+            title="Export V4 effect bank",
+            mode="save",
+            purpose="bank_export",
+            initial_directory=default.parent,
+            extension=".h",
+            filename=default.name,
+        )
 
     def _export_bank_used_bytes(self) -> int:
         return self.project.flash_bytes + sum(effect.flash_bytes for effect in self.export_bank_effects)
@@ -3138,11 +3429,13 @@ class Editor:
         if effect is None or effect.project_data is None:
             self.export_bank_status = "Selected effect has no embedded CnC Light project"
             return False
-        if confirm and not self._confirm_replace_project(
-            "Load embedded project",
-            f"Discard unsaved changes and load the embedded project for {effect.name}?",
-        ):
-            self.export_bank_status = "Embedded project load cancelled"
+        if confirm and self._project_is_dirty():
+            self._request_confirmation(
+                "Load embedded project",
+                f"Discard unsaved changes and load the embedded project for {effect.name}?",
+                "load_bank_project",
+                self.export_bank_selected,
+            )
             return False
         try:
             project = Project.from_dict(effect.project_data)
@@ -3786,6 +4079,10 @@ class Editor:
             self._draw_help()
         if self.recovery_open:
             self._draw_recovery_dialog()
+        if self.file_browser_open:
+            self._draw_file_browser()
+        if self.confirmation_open:
+            self._draw_confirmation_dialog()
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -5059,6 +5356,184 @@ class Editor:
         panel = pygame.Rect(0, 0, width, height)
         panel.center = self.screen.get_rect().center
         return panel
+
+    def _file_browser_panel_rect(self) -> pygame.Rect:
+        width = min(980, self.screen.get_width() - 50)
+        height = min(700, self.screen.get_height() - 50)
+        panel = pygame.Rect(0, 0, max(700, width), max(540, height))
+        panel.center = self.screen.get_rect().center
+        return panel
+
+    @staticmethod
+    def _file_browser_list_rect(panel: pygame.Rect) -> pygame.Rect:
+        return pygame.Rect(panel.x + 196, panel.y + 122, panel.width - 218, panel.height - 254)
+
+    def _draw_file_browser(self) -> None:
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((6, 8, 12, 226))
+        self.screen.blit(shade, (0, 0))
+        panel = self._file_browser_panel_rect()
+        pygame.draw.rect(self.screen, (25, 28, 36), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (80, 88, 107), panel, 1, border_radius=10)
+        x = panel.x + 22
+        self.screen.blit(
+            self.title.render(self.file_browser_title, True, (239, 242, 248)),
+            (x, panel.y + 19),
+        )
+        mode_label = "SAVE FILE" if self.file_browser_mode == "save" else "OPEN FILE"
+        rendered_mode = self.small.render(mode_label, True, (108, 180, 255))
+        self.screen.blit(rendered_mode, (panel.right - rendered_mode.get_width() - 22, panel.y + 25))
+
+        self.screen.blit(self.small.render("Location", True, (143, 153, 174)), (x, panel.y + 65))
+        path_field = pygame.Rect(x + 68, panel.y + 57, panel.width - 190, 34)
+        pygame.draw.rect(self.screen, (39, 43, 53), path_field, border_radius=4)
+        pygame.draw.rect(
+            self.screen,
+            ACCENT if self.file_browser_path_editing else (72, 79, 96),
+            path_field, 1, border_radius=4,
+        )
+        path_value = self.file_browser_path_input if self.file_browser_path_editing else str(self.file_browser_directory)
+        if self.file_browser_path_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            path_value += "|"
+        self.screen.blit(
+            self.small.render(self._fit_text(path_value, self.small, path_field.width - 16), True, (231, 235, 243)),
+            (path_field.x + 8, path_field.y + 9),
+        )
+        self.buttons.append((path_field, "file_browser_path", "Type folder path"))
+        self._button(
+            pygame.Rect(panel.right - 92, panel.y + 57, 70, 34),
+            "file_browser_up", "Up", False,
+        )
+
+        locations_rect = pygame.Rect(x, panel.y + 122, 160, panel.height - 254)
+        list_rect = self._file_browser_list_rect(panel)
+        for area in (locations_rect, list_rect):
+            pygame.draw.rect(self.screen, (20, 23, 30), area, border_radius=6)
+            pygame.draw.rect(self.screen, (57, 63, 77), area, 1, border_radius=6)
+        self.screen.blit(self.small.render("PLACES", True, (139, 149, 170)), (locations_rect.x + 10, locations_rect.y + 10))
+        location_y = locations_rect.y + 35
+        for index, (label, path) in enumerate(self._file_browser_locations()):
+            if location_y + 32 > locations_rect.bottom - 6:
+                break
+            button = pygame.Rect(locations_rect.x + 7, location_y, locations_rect.width - 14, 30)
+            active = os.path.normcase(str(path)) == os.path.normcase(str(self.file_browser_directory))
+            pygame.draw.rect(self.screen, (48, 60, 82) if active else (31, 35, 44), button, border_radius=4)
+            self.screen.blit(self.small.render(label, True, (222, 227, 237)), (button.x + 9, button.y + 8))
+            self.buttons.append((button, f"file_browser_location:{index}", str(path)))
+            location_y += 34
+
+        entries = self._file_browser_entries()
+        visible = max(1, (list_rect.height - 14) // 38)
+        maximum_scroll = max(0, len(entries) - visible)
+        self.file_browser_scroll = max(0, min(maximum_scroll, self.file_browser_scroll))
+        if self.file_browser_selected >= len(entries):
+            self.file_browser_selected = -1
+        for visible_index, entry in enumerate(entries[self.file_browser_scroll:self.file_browser_scroll + visible]):
+            entry_index = self.file_browser_scroll + visible_index
+            row = pygame.Rect(list_rect.x + 7, list_rect.y + 7 + visible_index * 38, list_rect.width - 14, 34)
+            selected = entry_index == self.file_browser_selected
+            pygame.draw.rect(self.screen, (48, 61, 84) if selected else (30, 34, 43), row, border_radius=4)
+            is_dir = entry.is_dir()
+            icon_color = (244, 190, 72) if is_dir else (91, 180, 255)
+            icon = pygame.Rect(row.x + 9, row.y + 9, 15, 12)
+            pygame.draw.rect(self.screen, icon_color, icon, 2, border_radius=2)
+            if is_dir:
+                pygame.draw.rect(self.screen, icon_color, (icon.x + 2, icon.y - 3, 7, 4), border_radius=1)
+            name = self._fit_text(entry.name, self.small, row.width - 150)
+            self.screen.blit(self.small.render(name, True, (231, 235, 243)), (row.x + 34, row.y + 9))
+            try:
+                stats = "FOLDER" if is_dir else f"{entry.stat().st_size / 1024:.1f} KiB"
+            except OSError:
+                stats = "FOLDER" if is_dir else "FILE"
+            stats_surface = self.small.render(stats, True, (132, 143, 164))
+            self.screen.blit(stats_surface, (row.right - stats_surface.get_width() - 9, row.y + 9))
+            self.buttons.append((row, f"file_browser_entry:{entry_index}", entry.name))
+        if not entries:
+            pattern = f"*{self.file_browser_extension}" if self.file_browser_extension else "files"
+            empty = self.font.render(f"No {pattern} files in this folder", True, (132, 143, 164))
+            self.screen.blit(empty, empty.get_rect(center=list_rect.center))
+        elif maximum_scroll:
+            gutter = pygame.Rect(list_rect.right - 5, list_rect.y + 7, 3, list_rect.height - 14)
+            pygame.draw.rect(self.screen, (48, 53, 65), gutter, border_radius=2)
+            handle_height = max(24, round(gutter.height * visible / len(entries)))
+            travel = gutter.height - handle_height
+            handle_y = gutter.y + round(travel * self.file_browser_scroll / maximum_scroll)
+            pygame.draw.rect(self.screen, (104, 126, 164), (gutter.x, handle_y, gutter.width, handle_height), border_radius=2)
+
+        bottom_y = panel.bottom - 111
+        self.screen.blit(self.small.render("File name", True, (143, 153, 174)), (x, bottom_y + 9))
+        filename_field = pygame.Rect(x + 76, bottom_y, panel.width - 290, 35)
+        pygame.draw.rect(self.screen, (39, 43, 53), filename_field, border_radius=4)
+        pygame.draw.rect(
+            self.screen,
+            ACCENT if self.file_browser_filename_editing else (72, 79, 96),
+            filename_field, 1, border_radius=4,
+        )
+        filename = self.file_browser_filename
+        if self.file_browser_filename_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            filename += "|"
+        filename_color = (231, 235, 243) if self.file_browser_mode == "save" else (159, 169, 188)
+        self.screen.blit(
+            self.small.render(self._fit_text(filename or "Select a file", self.small, filename_field.width - 16), True, filename_color),
+            (filename_field.x + 8, filename_field.y + 9),
+        )
+        if self.file_browser_mode == "save":
+            self.buttons.append((filename_field, "file_browser_filename", "File name"))
+        self._button(pygame.Rect(panel.right - 184, bottom_y, 76, 35), "file_browser_cancel", "Cancel", False)
+        accept_label = "Save" if self.file_browser_mode == "save" else "Open"
+        self._button(pygame.Rect(panel.right - 100, bottom_y, 78, 35), "file_browser_accept", accept_label, True)
+        error_prefixes = ("Cannot", "Invalid", "Operation", "That path", "Select", "Enter")
+        status_color = (255, 116, 103) if self.file_browser_status.startswith(error_prefixes) else (119, 205, 170)
+        status = self._fit_text(self.file_browser_status, self.small, panel.width - 44)
+        self.screen.blit(self.small.render(status, True, status_color), (x, panel.bottom - 48))
+        hint = "Enter: open/save  ·  Backspace: up  ·  double-click: open  ·  Ctrl+V works in text fields"
+        self.screen.blit(self.small.render(hint, True, (112, 123, 145)), (x, panel.bottom - 25))
+
+    def _draw_confirmation_dialog(self) -> None:
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((5, 7, 10, 210))
+        self.screen.blit(shade, (0, 0))
+        width = min(560, self.screen.get_width() - 60)
+        panel = pygame.Rect(0, 0, width, 220)
+        panel.center = self.screen.get_rect().center
+        pygame.draw.rect(self.screen, (27, 30, 39), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (87, 95, 115), panel, 1, border_radius=10)
+        x = panel.x + 24
+        self.screen.blit(
+            self.title.render(self.confirmation_title, True, (239, 242, 248)),
+            (x, panel.y + 23),
+        )
+        message_y = panel.y + 68
+        for line in self._wrap_text(self.confirmation_message, self.font, panel.width - 48):
+            self.screen.blit(self.font.render(line, True, (191, 198, 213)), (x, message_y))
+            message_y += 24
+        self._button(
+            pygame.Rect(panel.right - 214, panel.bottom - 54, 88, 34),
+            "confirmation_no", "Cancel", False,
+        )
+        self._button(
+            pygame.Rect(panel.right - 116, panel.bottom - 54, 92, 34),
+            "confirmation_yes", "Continue", True,
+        )
+        self.screen.blit(
+            self.small.render("Enter: continue  ·  Esc: cancel", True, (115, 126, 147)),
+            (x, panel.bottom - 43),
+        )
+
+    @staticmethod
+    def _wrap_text(value: str, font: pygame.font.Font, max_width: int) -> list[str]:
+        lines: list[str] = []
+        current = ""
+        for word in value.split():
+            candidate = f"{current} {word}".strip()
+            if current and font.size(candidate)[0] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines or [""]
 
     def _handle_help_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:

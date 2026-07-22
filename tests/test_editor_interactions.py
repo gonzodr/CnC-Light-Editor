@@ -1278,6 +1278,97 @@ def test_ctrl_n_starts_a_new_project():
     assert editor.project_path is None
 
 
+def test_headless_file_browser_saves_project_without_desktop_dialogs(tmp_path):
+    editor = make_editor()
+    editor.project.name = "Headless save"
+    editor._open_file_browser(
+        title="Save CnC Light project",
+        mode="save",
+        purpose="project_save",
+        initial_directory=tmp_path,
+        extension=".cnclight",
+        filename="pi-effect",
+    )
+
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {
+        "file_browser_path", "file_browser_up", "file_browser_filename",
+        "file_browser_cancel", "file_browser_accept",
+    } <= actions
+    assert editor._accept_file_browser() is True
+
+    saved = tmp_path / "pi-effect.cnclight"
+    assert saved.exists()
+    assert editor.project_path == saved.resolve()
+    assert editor.file_browser_open is False
+
+
+def test_headless_file_browser_filters_files_and_confirms_dirty_load(tmp_path):
+    source = Project("Load on Pi")
+    project_path = tmp_path / "load-me.cnclight"
+    source.save(project_path)
+    (tmp_path / "ignore.txt").write_text("not a project", encoding="utf-8")
+    folder = tmp_path / "Subfolder"
+    folder.mkdir()
+    editor = make_editor()
+    editor.project.name = "Unsaved current project"
+    editor._open_file_browser(
+        title="Open CnC Light project",
+        mode="open",
+        purpose="project_load",
+        initial_directory=tmp_path,
+        extension=".cnclight",
+    )
+
+    names = [entry.name for entry in editor._file_browser_entries()]
+    assert names == ["Subfolder", "load-me.cnclight"]
+    editor.file_browser_selected = names.index("load-me.cnclight")
+    assert editor._accept_file_browser() is False
+    assert editor.confirmation_open is True
+    assert editor.confirmation_action == "load_project"
+    assert editor.project.name == "Unsaved current project"
+
+    editor._resolve_confirmation(True)
+    assert editor.confirmation_open is False
+    assert editor.project.name == "Load on Pi"
+    assert editor.project_path == project_path.resolve()
+
+
+def test_all_file_operations_open_the_in_app_browser():
+    editor = make_editor()
+
+    editor._choose_project_save()
+    assert (editor.file_browser_mode, editor.file_browser_purpose) == ("save", "project_save")
+    editor._cancel_file_browser()
+    editor._choose_project_load()
+    assert (editor.file_browser_mode, editor.file_browser_purpose) == ("open", "project_load")
+    editor._cancel_file_browser()
+    editor._choose_effect_data()
+    assert (editor.file_browser_mode, editor.file_browser_purpose) == ("open", "effect_import")
+    editor._cancel_file_browser()
+    editor._choose_export_bank_map()
+    assert (editor.file_browser_mode, editor.file_browser_purpose) == ("open", "bank_map")
+    editor._cancel_file_browser()
+    editor._choose_export_bank_save()
+    assert (editor.file_browser_mode, editor.file_browser_purpose) == ("save", "bank_export")
+
+
+def test_dirty_new_project_uses_in_app_confirmation():
+    editor = make_editor()
+    editor.project.name = "Keep until confirmed"
+
+    assert editor._new_project(confirm=True) is False
+    assert editor.confirmation_open is True
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"confirmation_yes", "confirmation_no"} <= actions
+
+    editor._resolve_confirmation(True)
+    assert editor.confirmation_open is False
+    assert editor.project.name == "Untitled effect"
+
+
 def test_stroke_width_accepts_manual_values_up_to_five_percent():
     editor = make_editor()
     editor._create_shape("ellipse", (0.5, 0.5))
