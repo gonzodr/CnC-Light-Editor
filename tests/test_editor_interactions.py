@@ -402,6 +402,69 @@ def test_duration_can_be_entered_manually():
     assert editor.duration_editing is False
 
 
+def test_transform_field_can_be_clicked_typed_and_undone():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    editor.draw()
+    field = next(rect for rect, action, _label in editor.buttons if action == "scrub:x")
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": field.center},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"button": 1, "pos": field.center},
+    ))
+
+    assert editor.property_editing == "x"
+    for character in "0.25":
+        editor.handle_event(pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": ord(character) if character != "." else pygame.K_PERIOD, "unicode": character, "mod": 0},
+        ))
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": "\r", "mod": 0},
+    ))
+
+    assert editor.selected.x == 0.25
+    assert editor.property_editing is None
+    editor._undo()
+    assert editor.selected.x == 0.5
+
+
+def test_transform_field_accepts_numeric_clipboard_and_normalizes_rotation():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    editor.property_editing = "rotation"
+    editor.property_input = "0.0"
+    editor.property_input_select_all = True
+    editor._clipboard_text = lambda: "450"
+
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN,
+        {"key": pygame.K_v, "unicode": "v", "mod": pygame.KMOD_CTRL},
+    ))
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": "\r", "mod": 0},
+    ))
+
+    assert editor.selected.rotation == 90.0
+
+
+def test_transform_field_rejects_out_of_range_opacity():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    editor.property_editing = "opacity"
+    editor.property_input = "1.5"
+    editor.property_input_select_all = False
+
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": "\r", "mod": 0},
+    ))
+
+    assert editor.selected.opacity == 1.0
+    assert editor.property_editing == "opacity"
+    assert "must be 0–1" in editor.status
+
+
 def test_led_name_null_is_stored_on_selected_position():
     editor = make_editor()
     editor._action("edit_led_name")

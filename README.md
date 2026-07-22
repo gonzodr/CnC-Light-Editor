@@ -54,7 +54,7 @@ cnc-light-editor
 - Méretezés: húzd a négy sarokfogópont egyikét.
 - Forgatás: húzd a kijelölés fölötti kör alakú fogópontot.
 - Zoom: egérgörgő a viewport felett; pásztázás: középső egérgomb vagy `Space` + húzás.
-- Inspector: az X/Y/W/H/ROT/OPACITY mezőket vízszintesen húzva finoman állíthatod.
+- Inspector: az X/Y/W/H/ROT/OPACITY mezőket vízszintesen húzva finoman állíthatod, kattintás után pedig közvetlenül beírhatod az értéket. A számbevitel támogatja a `Ctrl+A`, `Ctrl+V`, Enter és Esc műveleteket.
 - Layer-sorrend: húzd a layer sorát fel vagy le. A timeline layernevére kattintva aktiválhatod; az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig törli az aktív layert.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.

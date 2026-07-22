@@ -77,6 +77,9 @@ class Editor:
         self.duration_editing = False
         self.stroke_input = "1.2"
         self.stroke_editing = False
+        self.property_editing: str | None = None
+        self.property_input = ""
+        self.property_input_select_all = False
         self.gradient_editor_open = False
         self.selected_gradient_stop_id: str | None = None
         self.random_led_editor_open = False
@@ -194,6 +197,9 @@ class Editor:
             if self.stroke_editing:
                 self._handle_stroke_input(event)
                 return
+            if self.property_editing:
+                self._handle_property_input(event)
+                return
             if event.key == pygame.K_ESCAPE and self.gradient_editor_open:
                 self.gradient_editor_open = False
                 self.drag_mode = None
@@ -218,6 +224,9 @@ class Editor:
                     self._apply_keyframe_context(action)
                 self.context_menu_pos = None
                 return
+            if event.button == 1 and self.property_editing:
+                self.property_editing = None
+                self.property_input_select_all = False
             if event.button == 3:
                 self.context_menu_pos = None
                 if timeline.collidepoint(event.pos) and not self._active_imported_effect():
@@ -257,6 +266,7 @@ class Editor:
                         self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
                     elif action.startswith("scrub:") and self.selected:
                         self.scrub_prop = action.split(":", 1)[1]
+                        self.property_editing = None
                         self.drag_mode = "scrub"
                         self.drag_origin = event.pos
                         self.drag_shape_state = dict(self.selected.state_at(self.current_ms))
@@ -355,12 +365,24 @@ class Editor:
                     and self.scrub_prop == "stroke_width"
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
+                open_property_input = (
+                    self.drag_mode == "scrub"
+                    and self.scrub_prop in {"x", "y", "width", "height", "rotation", "opacity"}
+                    and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
+                )
                 if not self.duration_editing:
                     self._commit_change()
                 if open_stroke_input and self.selected:
                     self.stroke_editing = True
                     self.stroke_input = f"{self.selected.state_at(self.current_ms).get('stroke_width', 0.012) * 100:.1f}"
                     self.status = "Type stroke width from 0.1 to 5.0, then press Enter"
+                elif open_property_input and self.selected and self.scrub_prop:
+                    prop = self.scrub_prop
+                    value = float(self.selected.state_at(self.current_ms)[prop])
+                    self.property_editing = prop
+                    self.property_input = f"{value:.1f}" if prop == "rotation" else f"{value:.3f}"
+                    self.property_input_select_all = True
+                    self.status = f"Type {TIMELINE_PROPERTY_LABELS[prop]}, then press Enter"
                 self.drag_mode = None
                 self.scrub_prop = None
                 self.drag_key_time = None
@@ -1604,6 +1626,7 @@ class Editor:
         self.active_import_index = None
         self.gradient_editor_open = False
         self.random_led_editor_open = False
+        self.property_editing = None
         self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
@@ -1940,6 +1963,78 @@ class Editor:
             if character in ".," and any(mark in self.stroke_input for mark in ".,"):
                 return
             self.stroke_input += character
+
+    def _handle_property_input(self, event: pygame.event.Event) -> None:
+        prop = self.property_editing
+        if not prop or not self.selected:
+            self.property_editing = None
+            return
+        ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
+        if ctrl and event.key == pygame.K_a:
+            self.property_input_select_all = True
+            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} value selected"
+            return
+        if ctrl and event.key == pygame.K_v:
+            pasted = self._clipboard_text().strip().replace(",", ".")
+            try:
+                float(pasted)
+            except ValueError:
+                self.status = "Clipboard does not contain a valid number"
+                return
+            self.property_input = pasted[:12] if self.property_input_select_all else (
+                self.property_input + pasted
+            )[:12]
+            self.property_input_select_all = False
+            self.status = f"Pasted {TIMELINE_PROPERTY_LABELS[prop]} — press Enter"
+            return
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+            try:
+                value = float(self.property_input.replace(",", "."))
+            except ValueError:
+                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be a number"
+                return
+            limits = {
+                "x": (0.0, 1.0), "y": (0.0, 1.0),
+                "width": (0.01, 5.0), "height": (0.01, 5.0),
+                "opacity": (0.0, 1.0),
+            }
+            if prop in limits and not limits[prop][0] <= value <= limits[prop][1]:
+                low, high = limits[prop]
+                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be {low:g}–{high:g}"
+                return
+            if prop == "rotation":
+                value %= 360.0
+            self._begin_change()
+            self._set_animated(prop, value)
+            self._commit_change()
+            self.property_editing = None
+            self.property_input_select_all = False
+            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {value:.3f}"
+            return
+        if event.key == pygame.K_ESCAPE:
+            self.property_editing = None
+            self.property_input_select_all = False
+            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} edit cancelled"
+            return
+        if event.key == pygame.K_BACKSPACE:
+            if self.property_input_select_all:
+                self.property_input = ""
+                self.property_input_select_all = False
+            else:
+                self.property_input = self.property_input[:-1]
+            return
+        character = getattr(event, "unicode", "")
+        if character.isdigit() or character in "-.,":
+            if self.property_input_select_all:
+                self.property_input = ""
+                self.property_input_select_all = False
+            normalized = "." if character == "," else character
+            if normalized == "-" and self.property_input:
+                return
+            if normalized == "." and "." in self.property_input:
+                return
+            if len(self.property_input) < 12:
+                self.property_input += normalized
 
     def _pick_led(self, point: tuple[float, float]) -> int:
         best = min(
@@ -2605,9 +2700,21 @@ class Editor:
                 row = index // 2
                 field = pygame.Rect(x + col * 143, y + row * 37, 132, 30)
                 hovered = field.collidepoint(pygame.mouse.get_pos())
-                pygame.draw.rect(self.screen, (49, 54, 67) if hovered else (40, 44, 54), field, border_radius=4)
-                pygame.draw.rect(self.screen, ACCENT if hovered else (67, 72, 86), field, 1, border_radius=4)
-                value_text = f"{value:.1f}°" if prop == "rotation" else f"{value:.3f}"
+                editing = self.property_editing == prop
+                pygame.draw.rect(
+                    self.screen, (49, 57, 72) if editing or hovered else (40, 44, 54),
+                    field, border_radius=4,
+                )
+                pygame.draw.rect(
+                    self.screen, ACCENT if editing or hovered else (67, 72, 86),
+                    field, 1, border_radius=4,
+                )
+                if editing:
+                    value_text = self.property_input
+                    if (pygame.time.get_ticks() // 500) % 2 == 0:
+                        value_text += "|"
+                else:
+                    value_text = f"{value:.1f}°" if prop == "rotation" else f"{value:.3f}"
                 self.screen.blit(self.small.render(label, True, (130, 138, 157)), (field.x + 7, field.y + 7))
                 rendered = self.small.render(value_text, True, (231, 234, 242))
                 self.screen.blit(rendered, (field.right - rendered.get_width() - 7, field.y + 7))
