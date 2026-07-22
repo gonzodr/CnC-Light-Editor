@@ -97,6 +97,12 @@ def test_space_and_timeline_controls_share_reliable_playback_state():
     }
     assert timeline_controls["play"] == "Stop"
     assert {"step_frame:-1", "step_frame:1"} <= timeline_controls.keys()
+    transport_rects = [
+        rect for rect, action, _label in editor.buttons
+        if action in {"step_frame:-1", "play", "step_frame:1"}
+    ]
+    track = editor._timeline_track(timeline)
+    assert max(rect.bottom for rect in transport_rects) <= track.y - 24
 
     editor._action("play")
     assert editor.playing is False

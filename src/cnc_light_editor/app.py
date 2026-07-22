@@ -103,6 +103,9 @@ INSPECTOR_WIDTH = 318
 DEFAULT_TIMELINE_HEIGHT = 218
 MIN_TIMELINE_HEIGHT = 150
 MAX_TIMELINE_HEIGHT = 520
+TIMELINE_TOOLBAR_HEIGHT = 34
+TIMELINE_RULER_HEIGHT = 24
+TIMELINE_BOTTOM_PADDING = 13
 MIN_VIEWPORT_HEIGHT = 260
 DEFAULT_WINDOW_SIZE = (1280, 1024)
 MIN_WINDOW_SIZE = (1024, 720)
@@ -1587,7 +1590,13 @@ class Editor:
 
     @staticmethod
     def _timeline_track(rect: pygame.Rect) -> pygame.Rect:
-        return pygame.Rect(rect.x + 180, rect.y + 35, max(80, rect.width - 195), rect.height - 48)
+        track_top = rect.y + TIMELINE_TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT
+        return pygame.Rect(
+            rect.x + 180,
+            track_top,
+            max(80, rect.width - 195),
+            max(1, rect.bottom - TIMELINE_BOTTOM_PADDING - track_top),
+        )
 
     def _timeline_layer_capacity(self, timeline: pygame.Rect) -> int:
         # Keep one text line free below the rows for timeline help and the
@@ -4164,13 +4173,18 @@ class Editor:
 
         play_x = round(self._time_to_timeline_x(self.current_ms, timeline))
         if track.x <= play_x <= track.right:
+            playhead_tip_y = track.y - 5
             pygame.draw.polygon(
                 self.screen, (255, 83, 72),
-                [(play_x - 6, timeline.y + 20), (play_x + 6, timeline.y + 20), (play_x, timeline.y + 29)],
+                [
+                    (play_x - 6, playhead_tip_y - 9),
+                    (play_x + 6, playhead_tip_y - 9),
+                    (play_x, playhead_tip_y),
+                ],
             )
             pygame.draw.line(
                 self.screen, (255, 83, 72),
-                (play_x, timeline.y + 24), (play_x, track.bottom), 2,
+                (play_x, playhead_tip_y - 5), (play_x, track.bottom), 2,
             )
         hint = "Graph Editor • drag points in 2D • right-click: easing/delete • wheel: time zoom"
         self.screen.blit(self.small.render(hint, True, (132, 139, 155)), (track.x, timeline.bottom - 22))
@@ -4255,6 +4269,14 @@ class Editor:
             pygame.Rect(rect.x + 266, rect.y + 5, 32, 25),
             "step_frame:1", "next",
         )
+        ruler = pygame.Rect(
+            track.x,
+            rect.y + TIMELINE_TOOLBAR_HEIGHT,
+            track.width,
+            TIMELINE_RULER_HEIGHT,
+        )
+        pygame.draw.rect(self.screen, (26, 29, 36), ruler)
+        pygame.draw.line(self.screen, (55, 60, 72), ruler.topleft, ruler.topright)
         if frame_ruler:
             grid_text = (
                 f"FRAME GRID  •  {frame_ms:g} ms  •  {self.timeline_zoom:.1f}x"
@@ -4275,20 +4297,26 @@ class Editor:
             for frame_index in range(first_minor, last_frame + 1, minor_step):
                 tick = frame_index * frame_ms
                 x = round(self._time_to_timeline_x(tick, rect))
-                pygame.draw.line(self.screen, (58, 63, 75), (x, rect.y + 27), (x, track.bottom), 1)
+                pygame.draw.line(self.screen, (58, 63, 75), (x, track.y - 7), (x, track.bottom), 1)
             first_label = math.ceil(start / frame_ms / label_step) * label_step
             for frame_index in range(first_label, last_frame + 1, label_step):
                 tick = frame_index * frame_ms
                 x = round(self._time_to_timeline_x(tick, rect))
-                pygame.draw.line(self.screen, (82, 88, 103), (x, rect.y + 22), (x, track.bottom), 1)
-                self.screen.blit(self.small.render(f"F{frame_index}", True, (145, 151, 166)), (x + 3, rect.y + 8))
+                pygame.draw.line(self.screen, (82, 88, 103), (x, track.y - 12), (x, track.bottom), 1)
+                self.screen.blit(
+                    self.small.render(f"F{frame_index}", True, (145, 151, 166)),
+                    (x + 3, ruler.y + 3),
+                )
         else:
             tick_ms = 1000 if visible_ms > 4000 else 500 if visible_ms > 2000 else 200 if visible_ms > 1000 else 100
             tick = math.ceil(start / tick_ms) * tick_ms
             while tick <= end:
                 x = round(self._time_to_timeline_x(tick, rect))
-                pygame.draw.line(self.screen, (72, 77, 91), (x, rect.y + 23), (x, track.bottom), 1)
-                self.screen.blit(self.small.render(f"{tick / 1000:g}s", True, (145, 151, 166)), (x + 4, rect.y + 8))
+                pygame.draw.line(self.screen, (72, 77, 91), (x, track.y - 11), (x, track.bottom), 1)
+                self.screen.blit(
+                    self.small.render(f"{tick / 1000:g}s", True, (145, 151, 166)),
+                    (x + 4, ruler.y + 3),
+                )
                 tick += tick_ms
 
         if self.timeline_mode == "graph" and not imported:
@@ -4442,8 +4470,19 @@ class Editor:
 
         play_x = round(self._time_to_timeline_x(self.current_ms, rect))
         if track.x <= play_x <= track.right:
-            pygame.draw.polygon(self.screen, (255, 83, 72), [(play_x - 6, rect.y + 20), (play_x + 6, rect.y + 20), (play_x, rect.y + 29)])
-            pygame.draw.line(self.screen, (255, 83, 72), (play_x, rect.y + 24), (play_x, track.bottom), 2)
+            playhead_tip_y = track.y - 5
+            pygame.draw.polygon(
+                self.screen, (255, 83, 72),
+                [
+                    (play_x - 6, playhead_tip_y - 9),
+                    (play_x + 6, playhead_tip_y - 9),
+                    (play_x, playhead_tip_y),
+                ],
+            )
+            pygame.draw.line(
+                self.screen, (255, 83, 72),
+                (play_x, playhead_tip_y - 5), (play_x, track.bottom), 2,
+            )
 
         if self.drag_mode == "keyframe_marquee" and self.keyframe_marquee_current:
             left, right = sorted((self.drag_origin[0], self.keyframe_marquee_current[0]))
