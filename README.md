@@ -23,11 +23,11 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Stencil mód: nagy, additívan keveredő fényforrások világítanak az alfa-lyukas playfield artwork mögött.
 - Kalibrációs nézet húzható, hozzáadható és törölhető LED-helyekkel, beírható firmware-ID-vel, LED-nevekkel és ütközésmentes indexcserével.
 - V4 baked-RGB `effect_data.h` import, effektválasztás és loop/outro-hű idővonalas lejátszás; a régi `EffectID...` maszkfájlok olvasása kompatibilitási módként megmaradt.
-- A `NULL` nevű LED-slotok előnézetben és exportban kikapcsolva maradnak.
-- Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál. A `NULL` slot RGB-je fekete.
-- JSON projektmentés és visszatöltés.
+- A `NULL` nevű LED-slotok előnézetben kikapcsolva maradnak; `OVERLAY` exportban alapból átlátszó sentinelt kapnak, nem fekete pixelt.
+- Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál.
+- JSON projektmentés és visszatöltés, valamint mentetlen munkára figyelmeztető `New` projektindítás.
 - A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops`, `loopFrames` és `overlay` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
-- Külön Effect Bank / Export ablak a meglévő `effect_data.h` feltérképezéséhez, több effekt együttes újraexportálásához és a fix 150 KiB flash-keret vizuális tervezéséhez.
+- Külön Effect Bank / Export ablak a meglévő `effect_data.h` feltérképezéséhez, több effekt együttes újraexportálásához és a fix 150 KiB flash-keret vizuális tervezéséhez. Az editor által exportált effektek a szerkeszthető projektjüket is hordozzák tömörített kommentként, és közvetlenül visszatölthetők a bankból.
 
 ## Telepítés Windows alatt
 
@@ -78,16 +78,19 @@ cnc-light-editor
 - Hotkey súgó: a felső `?` gomb vagy `F1`; bezárás: `Esc`, `F1` vagy az ablak `×` gombja.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.
 - Snap ki/be: `G`. Bekapcsolva az alakzat pozícióját és méretét 0,01-es normalizált rácsra, a forgatást 15°-ra, a keyframe idejét pedig FPS-képkockahatárra igazítja; kikapcsolva minden folyamatosan mozgatható.
+- Új projekt: felső `New` gomb vagy `Ctrl+N`. Mentetlen módosítás esetén az editor megerősítést kér, majd tiszta, mentetlen projektet nyit.
 - Projektmentés/betöltés: `Ctrl+S`, `Ctrl+O`; Save As: `Ctrl+Shift+S`. Az első mentés fájlnevet kér, a további mentések ugyanazt a `.cnclight` fájlt frissítik.
 - A jobb oldali színminták az aktuális playheadnél hoznak létre szín-keyframe-et. Többszörös keyframe-kijelölésnél a kiválasztott szín minden kijelölt időpontra egyszerre kerül rá.
 
-A toolbar `Export` gombja az Effect Bank ablakot nyitja meg. A `Map header…` beolvassa egy meglévő V4 `effect_data.h` összes effektjét; a felső szegmentált memóriasáv és az effektenkénti színes hosszcsíkok a tényleges `frames × 204` flash-foglalást mutatják. A panel kijelzi a 150 KiB keretből felhasznált és szabad helyet, valamint az aktuális projekt FPS-ével becsült hátralévő animációs időt. Egy blokkra kattintva a név és az explicit firmware-ID szerkeszthető, a mappelt effekt eltávolítható az exportbankból. Az aktuális projekt mindig külön `CURRENT` blokként szerepel, és a saját exportnevét/ID-ját ugyanitt lehet beállítani. Az `Export bank…` egy közös, firmware-kész V4 headert ír; duplikált ID, hibás LED-map vagy 150 KiB fölötti adat esetén blokkolja az exportot.
+A toolbar `Export` gombja az Effect Bank ablakot nyitja meg. A `Map header…` beolvassa egy meglévő V4 `effect_data.h` összes effektjét; a felső szegmentált memóriasáv és az effektenkénti színes hosszcsíkok a tényleges `frames × 204` flash-foglalást mutatják. A panel kijelzi a 150 KiB keretből felhasznált és szabad helyet, valamint az aktuális projekt FPS-ével becsült hátralévő animációs időt. Egy blokkra kattintva a név és az explicit firmware-ID szerkeszthető, a mappelt effekt eltávolítható az exportbankból. A `BANK+PROJECT` jelölésű effektnél a `Load editable project` visszaállítja a teljes layereket, shape-eket és keyframe-eket; a bankban átírt név és ID az így betöltött projektbe is átkerül. Az aktuális projekt mindig külön `CURRENT` blokként szerepel, és a saját exportnevét/ID-ját ugyanitt lehet beállítani. Az `Export bank…` egy közös, firmware-kész V4 headert ír; duplikált ID, hibás LED-map vagy 150 KiB fölötti adat esetén blokkolja az exportot.
+
+Az exportált szerkesztőprojekt verziózott, zlibbel tömörített Base64 adatként, kizárólag `//` kommentekben kerül az adott RGB-tömb mellé. Az Arduino fordító figyelmen kívül hagyja, ezért nem fogyaszt a 150 KiB effektbankból és nem kerül a mikrokontroller flashébe. Régebbi vagy más eszközzel készült header továbbra is betölthető, de annál az Effect Bank csak a baked képkockákat tudja lejátszani; szerkeszthető projekt nélkül nem jelenik meg a visszatöltő gomb.
 
 A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
 
 A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a `bakedEffects[]` leírókat, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
-Az editor minden opacityt, easinget, gradientet és generatív effektet előre belesüt a frame-ek RGB-értékeibe. A V4 motor kizárólag ezeket a kész képkockákat játssza le. A loop első `loopFrames` képkockája `loops` alkalommal ismétlődik, a maradék outro egyszer fut le; az ID explicit és nem függ a táblasorrendtől. `FULL` módban minden LED-re kész RGB kerül. `CANVAS/OVERLAY` módban a formák által nem festett cella `(255,0,255)` sentinel, amit a firmware átugrik; a `(0,0,0)` továbbra is valódi, fedő fekete. Ha egy festett szín pontosan `(255,0,255)` lenne, az export `(254,0,255)` értékre módosítja, így nem ütközik a transzparens sentinel értékével. A `NULL` LED-map helyek mindkét módban fekete nullákként kerülnek a 68 LED-es adatba.
+Az editor minden opacityt, easinget, gradientet és generatív effektet előre belesüt a frame-ek RGB-értékeibe. A V4 motor kizárólag ezeket a kész képkockákat játssza le. A loop első `loopFrames` képkockája `loops` alkalommal ismétlődik, a maradék outro egyszer fut le; az ID explicit és nem függ a táblasorrendtől. `FULL` módban minden LED-re kész RGB kerül. `CANVAS/OVERLAY` módban a formák által nem festett cella `(255,0,255)` sentinel, amit a firmware átugrik; a `(0,0,0)` továbbra is valódi, fedő fekete. Ha egy festett szín pontosan `(255,0,255)` lenne, az export `(254,0,255)` értékre módosítja, így nem ütközik a transzparens sentinel értékével. A `NULL` LED-map helyek `OVERLAY` módban ugyanezt az átlátszó sentinelt kapják. `FULL` módban feketének kell maradniuk, mert a jelenlegi firmware ebben a módban minden RGB-cellát ténylegesen kiír, tehát nincs átlátszóság-fogalma.
 
 ## LED-kalibráció
 

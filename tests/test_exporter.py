@@ -25,7 +25,10 @@ def test_export_pads_playfield_map_to_68_leds_and_writes_v4_metadata(tmp_path):
     assert len(effect.frames) == 2
     assert len(effect.frames[0]) == 68
     assert effect.frames[0][0] == (1, 2, 3)
-    assert effect.frames[0][-9:] == [(0, 0, 0)] * 9
+    assert effect.frames[0][-9:] == [(255, 0, 255)] * 9
+    assert effect.project_data is not None
+    restored = Project.from_dict(effect.project_data)
+    assert (restored.name, restored.effect_id, restored.overlay) == ("Launch flash", 6, True)
 
 
 def test_identical_frames_are_kept_for_fixed_frame_ms_firmware(tmp_path):
@@ -39,17 +42,29 @@ def test_identical_frames_are_kept_for_fixed_frame_ms_firmware(tmp_path):
     assert len(set(tuple(frame) for frame in effect.frames)) == 1
 
 
-def test_null_slot_exports_black_rgb(tmp_path):
+def test_null_slot_exports_transparent_sentinel_in_overlay_mode(tmp_path):
     shape = Shape("rectangle", "all", width=1.0, height=1.0, color=(10, 20, 30))
-    project = Project(duration_ms=100, frame_ms=50, layers=[Layer("one", shapes=[shape])])
+    project = Project(
+        duration_ms=100, frame_ms=50, overlay=True,
+        layers=[Layer("one", shapes=[shape])],
+    )
     slots = [(0.5, 0.5)] * 59
     slots[7] = None
     path = export_arduino_header(project, slots, tmp_path / "effect_data.h")
     frame = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames[0]
 
     assert frame[6] == (10, 20, 30)
-    assert frame[7] == (0, 0, 0)
+    assert frame[7] == (255, 0, 255)
     assert frame[8] == (10, 20, 30)
+
+
+def test_null_slot_stays_black_in_full_mode_because_full_firmware_draws_every_rgb(tmp_path):
+    project = Project(duration_ms=50, frame_ms=50, overlay=False)
+
+    path = export_arduino_header(project, [None], tmp_path / "full.h")
+    frame = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames[0]
+
+    assert frame[0] == (0, 0, 0)
 
 
 def test_export_rejects_loop_boundary_past_stored_frames(tmp_path):
@@ -151,4 +166,4 @@ def test_overlay_export_preserves_opaque_black_and_avoids_real_magenta_collision
     assert frame[0] == (0, 0, 0)
     assert frame[1] == (255, 0, 255)
     assert frame[2] == (254, 0, 255)
-    assert frame[3] == (0, 0, 0)
+    assert frame[3] == (255, 0, 255)

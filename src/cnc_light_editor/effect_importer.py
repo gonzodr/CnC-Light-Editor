@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from .model import Color
+from .project_bundle import extract_embedded_projects
 
 
 EFFECT_LEDS = 68
@@ -44,6 +45,7 @@ class ImportedEffect:
     loops: int = 1
     loop_frames: int = 0
     overlay: bool = False
+    project_data: dict | None = None
 
     @property
     def normalized_loop_frames(self) -> int:
@@ -87,13 +89,17 @@ def load_effect_data(path: str | Path) -> list[ImportedEffect]:
 
 
 def parse_effect_data(source: str) -> list[ImportedEffect]:
+    embedded_projects = extract_embedded_projects(source)
     clean = _strip_comments(source)
     if re.search(r"\bbakedEffects\s*\[", clean):
-        return _parse_v4_effects(clean)
+        return _parse_v4_effects(clean, embedded_projects)
     return _parse_legacy_effects(clean)
 
 
-def _parse_v4_effects(source: str) -> list[ImportedEffect]:
+def _parse_v4_effects(
+    source: str, embedded_projects: dict[int, dict] | None = None,
+) -> list[ImportedEffect]:
+    embedded_projects = embedded_projects or {}
     arrays: dict[str, list[int]] = {}
     array_pattern = re.compile(
         r"(?:static\s+)?const\s+uint8_t\s+(fx_[A-Za-z_]\w*)\s*\[\s*\]\s+"
@@ -163,6 +169,7 @@ def _parse_v4_effects(source: str) -> list[ImportedEffect]:
             frames.append([tuple(chunk[index:index + 3]) for index in range(0, BYTES_PER_FRAME, 3)])
         effects.append(ImportedEffect(
             name, frames, frame_ms, effect_id, symbol, loops, loop_frames, bool(overlay),
+            embedded_projects.get(effect_id),
         ))
 
     if not effects:

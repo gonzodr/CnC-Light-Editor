@@ -36,6 +36,7 @@ BANK_COLORS = [
 HELP_COLUMNS = (
     (
         ("PROJECT", (
+            ("Ctrl + N / New", "Start a blank project"),
             ("Ctrl + S", "Save project"),
             ("Ctrl + Shift + S", "Save project as"),
             ("Ctrl + O", "Load project"),
@@ -623,6 +624,9 @@ class Editor:
         if ctrl and event.key == pygame.K_i:
             self._action("import_effect_data")
             return
+        if ctrl and event.key == pygame.K_n:
+            self._action("new")
+            return
         if self.calibration:
             if event.key == pygame.K_ESCAPE and self.drag_mode == "led_move":
                 self._cancel_led_move()
@@ -1000,6 +1004,8 @@ class Editor:
             self.status = "Type duration in seconds (0.5–15), then press Enter"
         elif action == "save":
             self._save_current_project()
+        elif action == "new":
+            self._new_project()
         elif action == "save_as":
             self._choose_project_save()
         elif action == "load":
@@ -2340,9 +2346,21 @@ class Editor:
     def load_project_file(self, path: str | Path) -> None:
         target = Path(path)
         project = Project.load(target)
+        self._install_project(
+            project, target.resolve(), saved=True, status=f"Loaded project: {target.name}",
+        )
+
+    def _install_project(
+        self,
+        project: Project,
+        project_path: Path | None,
+        *,
+        saved: bool,
+        status: str,
+    ) -> None:
         self.project = project
-        self.project_path = target.resolve()
-        self.saved_project_state = deepcopy(project.to_dict())
+        self.project_path = project_path
+        self.saved_project_state = deepcopy(project.to_dict()) if saved else None
         self.selected = None
         self.selected_keyframes.clear()
         self.timeline_selected_layer_id = None
@@ -2350,8 +2368,12 @@ class Editor:
         self.current_ms = 0
         self.playing = False
         self.active_import_index = None
+        self.stencil = False
+        self.calibration = False
         self.gradient_editor_open = False
         self.random_led_editor_open = False
+        self.export_bank_open = False
+        self.help_open = False
         self.property_editing = None
         self.duration_input = f"{self.project.duration_ms / 1000:.1f}"
         self.timeline_zoom = 1.0
@@ -2361,10 +2383,46 @@ class Editor:
         self.timeline_mode = "dope"
         self.graph_target_id = None
         self.graph_prop = None
+        self.zoom = 1.0
+        self.pan.update(0, 0)
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.change_snapshot = None
-        self.status = f"Loaded project: {target.name}"
+        self.status = status
+
+    def _confirm_replace_project(self, title: str, message: str) -> bool:
+        if not self._project_is_dirty():
+            return True
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            return bool(messagebox.askyesno(title, message, parent=root))
+        except Exception as error:
+            self.status = f"Confirmation failed: {error}"
+            return False
+        finally:
+            if root is not None:
+                root.destroy()
+
+    def _new_project(self, confirm: bool = True) -> bool:
+        if confirm and not self._confirm_replace_project(
+            "New project",
+            "The current project has unsaved changes. Discard them and start a new project?",
+        ):
+            self.status = "New project cancelled — current project kept"
+            return False
+        self._install_project(
+            Project("Untitled effect"), None, saved=False, status="New blank project",
+        )
+        return True
 
     def _save_current_project(self) -> None:
         if self.project_path is None:
@@ -2570,6 +2628,32 @@ class Editor:
             return self.export_bank_effects[self.export_bank_selected]
         return None
 
+    def _load_export_bank_project(self, confirm: bool = True) -> bool:
+        effect = self._export_bank_selected_effect()
+        if effect is None or effect.project_data is None:
+            self.export_bank_status = "Selected effect has no embedded CnC Light project"
+            return False
+        if confirm and not self._confirm_replace_project(
+            "Load embedded project",
+            f"Discard unsaved changes and load the embedded project for {effect.name}?",
+        ):
+            self.export_bank_status = "Embedded project load cancelled"
+            return False
+        try:
+            project = Project.from_dict(effect.project_data)
+            project.name = effect.name
+            project.effect_id = effect.effect_id
+        except (TypeError, ValueError, KeyError) as error:
+            self.export_bank_status = f"Embedded project is invalid: {error}"
+            return False
+        self._install_project(
+            project,
+            None,
+            saved=False,
+            status=f"Loaded embedded project: {effect.name} · ID {effect.effect_id}",
+        )
+        return True
+
     def _handle_export_bank_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN:
             if self.export_bank_name_editing or self.export_bank_id_editing:
@@ -2614,6 +2698,8 @@ class Editor:
                 self.export_bank_status = "Export blocked: " + " · ".join(errors)
             else:
                 self._choose_export_bank_save()
+        elif action == "export_bank_load_project":
+            self._load_export_bank_project()
         elif action == "export_bank_edit_name":
             effect = self._export_bank_selected_effect()
             self.export_bank_name_input = effect.name if effect else self.project.name
@@ -2694,7 +2780,12 @@ class Editor:
                 self.export_bank_status = "Effect name cannot be empty"
                 return False
             if effect:
-                self.export_bank_effects[self.export_bank_selected] = replace(effect, name=name)
+                project_data = deepcopy(effect.project_data)
+                if project_data is not None:
+                    project_data["name"] = name
+                self.export_bank_effects[self.export_bank_selected] = replace(
+                    effect, name=name, project_data=project_data,
+                )
             else:
                 self._begin_change()
                 self.project.name = name
@@ -2719,7 +2810,12 @@ class Editor:
                 self.export_bank_status = f"Effect ID {effect_id} is already used"
                 return False
             if effect:
-                self.export_bank_effects[self.export_bank_selected] = replace(effect, effect_id=effect_id)
+                project_data = deepcopy(effect.project_data)
+                if project_data is not None:
+                    project_data["effect_id"] = effect_id
+                self.export_bank_effects[self.export_bank_selected] = replace(
+                    effect, effect_id=effect_id, project_data=project_data,
+                )
             else:
                 self._begin_change()
                 self.project.effect_id = effect_id
@@ -3148,6 +3244,7 @@ class Editor:
             self._button(rect, action, label, active)
             x += button_width + 7
 
+        self._button(pygame.Rect(width - 118, 11, 58, 32), "new", "New", False)
         self._button(pygame.Rect(width - 52, 11, 36, 32), "help", "?", False)
 
         duration_field = self._duration_input_rect()
@@ -4320,7 +4417,10 @@ class Editor:
         pygame.draw.rect(self.screen, (77, 84, 102), panel, 1, border_radius=10)
         x, y = panel.x + 26, panel.y + 21
         self.screen.blit(self.title.render("EFFECT BANK / EXPORT", True, (238, 241, 248)), (x, y))
-        subtitle = self.small.render("V4 baked RGB memory planner · fixed 150 KiB budget", True, (143, 153, 174))
+        subtitle = self.small.render(
+            "V4 baked RGB memory planner · 150 KiB flash · embedded editable projects",
+            True, (143, 153, 174),
+        )
         self.screen.blit(subtitle, (x, y + 31))
         self._button(pygame.Rect(panel.right - 344, y, 126, 32), "export_bank_map", "Map header…", False)
         errors = self._export_bank_validation_errors()
@@ -4401,7 +4501,7 @@ class Editor:
             else:
                 effect = self.export_bank_effects[entry_index]
                 effect_id, frames, timing = effect.effect_id, len(effect.frames), effect.frame_ms
-                marker = "BANK"
+                marker = "BANK+PROJECT" if effect.project_data is not None else "BANK"
             label = self._fit_text(f"{marker}  ·  ID {effect_id}  ·  {name}", self.small, row.width - 178)
             self.screen.blit(self.small.render(label, True, (232, 235, 242)), (row.x + 9, row.y + 7))
             stats = f"{byte_count / 1024:.1f}K  {frames * timing / 1000:.2f}s"
@@ -4459,13 +4559,24 @@ class Editor:
             ("Flash", f"{byte_count / 1024:.2f} KiB"),
             ("Loop / outro", f"{loop_frames} loop frames  ×{loops}"),
             ("Canvas mode", "OVERLAY" if overlay else "FULL"),
+            ("Editable project", "Embedded" if current or effect.project_data is not None else "Not available"),
         ]
         for label, value in metadata:
             self.screen.blit(self.small.render(label, True, (132, 141, 160)), (x, y))
             rendered = self.small.render(value, True, (220, 225, 235))
             self.screen.blit(rendered, (detail.right - rendered.get_width() - 14, y))
-            y += 28
+            y += 20
         if not current:
+            if effect.project_data is not None:
+                self._button(
+                    pygame.Rect(x, detail.bottom - 86, detail.width - 28, 32),
+                    "export_bank_load_project", "Load editable project", True,
+                )
+            else:
+                self.screen.blit(
+                    self.small.render("No project bundle in this header effect", True, (132, 141, 160)),
+                    (x, detail.bottom - 76),
+                )
             self._button(
                 pygame.Rect(x, detail.bottom - 48, detail.width - 28, 32),
                 "export_bank_remove", "Remove from export bank", False,

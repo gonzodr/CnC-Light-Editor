@@ -6,7 +6,11 @@ import pygame
 
 from cnc_light_editor.app import Editor
 from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect, parse_effect_data
-from cnc_light_editor.exporter import export_effect_bank, sample_project_frames
+from cnc_light_editor.exporter import (
+    export_effect_bank,
+    project_to_imported_effect,
+    sample_project_frames,
+)
 from cnc_light_editor.model import Layer, Project, Shape
 
 
@@ -1016,6 +1020,34 @@ def test_project_save_load_round_trip_and_dirty_state(tmp_path):
     assert editor._project_is_dirty() is False
 
 
+def test_new_button_starts_a_blank_unsaved_project_without_dialog():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.3, 0.4))
+    editor.draw()
+
+    assert "new" in {action for _rect, action, _label in editor.buttons}
+    assert editor._new_project(confirm=False) is True
+    assert editor.project.name == "Untitled effect"
+    assert len(editor.project.layers) == 1
+    assert editor.project.layers[0].shapes == []
+    assert editor.project_path is None
+    assert editor._project_is_dirty() is True
+    assert editor.undo_stack == []
+
+
+def test_ctrl_n_starts_a_new_project():
+    editor = make_editor()
+    editor.saved_project_state = editor.project.to_dict()
+
+    editor._handle_key(pygame.event.Event(
+        pygame.KEYDOWN,
+        {"key": pygame.K_n, "mod": pygame.KMOD_CTRL, "unicode": "n"},
+    ))
+
+    assert editor.project.name == "Untitled effect"
+    assert editor.project_path is None
+
+
 def test_stroke_width_accepts_manual_values_up_to_five_percent():
     editor = make_editor()
     editor._create_shape("ellipse", (0.5, 0.5))
@@ -1345,6 +1377,40 @@ def test_effect_bank_maps_header_and_edits_imported_name_and_id(tmp_path):
     assert editor.export_bank_effects[0].effect_id == 9
 
 
+def test_effect_bank_loads_an_embedded_editable_project(tmp_path):
+    source_project = Project(
+        "Editable pulse", duration_ms=150, frame_ms=50, effect_id=13,
+        layers=[Layer("Artwork", shapes=[Shape("rectangle", "Box", color=(12, 34, 56))])],
+    )
+    header = export_effect_bank(
+        [project_to_imported_effect(source_project, [(0.5, 0.5)])],
+        tmp_path / "effect_data.h",
+    )
+    editor = make_editor()
+    editor.map_effect_bank_file(header)
+    editor.export_bank_selected = 0
+    editor.export_bank_open = True
+
+    assert editor.export_bank_effects[0].project_data is not None
+    editor._export_bank_action("export_bank_edit_name")
+    editor.export_bank_name_input = "Renamed editable pulse"
+    assert editor._commit_export_bank_input() is True
+    editor._export_bank_action("export_bank_edit_id")
+    editor.export_bank_id_input = "14"
+    assert editor._commit_export_bank_input() is True
+    editor.draw()
+    assert "export_bank_load_project" in {
+        action for _rect, action, _label in editor.buttons
+    }
+    assert editor._load_export_bank_project(confirm=False) is True
+    assert editor.export_bank_open is False
+    assert (editor.project.name, editor.project.effect_id) == ("Renamed editable pulse", 14)
+    assert editor.project.layers[0].shapes[0].name == "Box"
+    assert editor.project.layers[0].shapes[0].color == (12, 34, 56)
+    assert editor.project_path is None
+    assert editor._project_is_dirty() is True
+
+
 def test_effect_bank_rejects_duplicate_id_and_exports_current_project_with_bank(tmp_path):
     black = [[(0, 0, 0)] * 68]
     editor = make_editor()
@@ -1365,6 +1431,8 @@ def test_effect_bank_rejects_duplicate_id_and_exports_current_project_with_bank(
     assert [(effect.effect_id, effect.name) for effect in effects] == [
         (7, "Existing"), (4, "Current animation"),
     ]
+    assert effects[0].project_data is None
+    assert effects[1].project_data is not None
 
 
 def test_effect_bank_edits_current_export_name_and_id_as_undoable_project_settings():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from copy import deepcopy
 import json
 import math
 from pathlib import Path
@@ -216,7 +217,11 @@ class Project:
 
     @classmethod
     def load(cls, path: str | Path) -> "Project":
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Project":
+        raw = deepcopy(data)
         layers: list[Layer] = []
         for layer_raw in raw.pop("layers", []):
             layer_keyframes = {
