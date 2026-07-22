@@ -1,7 +1,7 @@
 import pytest
 
-from cnc_light_editor.effect_importer import parse_effect_data
-from cnc_light_editor.exporter import export_arduino_header
+from cnc_light_editor.effect_importer import ImportedEffect, parse_effect_data
+from cnc_light_editor.exporter import export_arduino_header, export_effect_bank
 from cnc_light_editor.model import Layer, Project, Shape
 
 
@@ -68,3 +68,34 @@ def test_export_defaults_to_full_canvas_mode(tmp_path):
 
     assert "FULL (black stays black)" in text
     assert effect.overlay is False
+
+
+def test_effect_bank_exports_multiple_editable_effect_definitions(tmp_path):
+    black_frame = [[(0, 0, 0)] * 68]
+    effects = [
+        ImportedEffect("Pulse", black_frame, effect_id=2),
+        ImportedEffect("Pulse", black_frame * 2, frame_ms=40, effect_id=7, loops=3),
+    ]
+
+    path = export_effect_bank(effects, tmp_path / "effect_data.h")
+    text = path.read_text(encoding="utf-8")
+    loaded = parse_effect_data(text)
+
+    assert [effect.effect_id for effect in loaded] == [2, 7]
+    assert [effect.name for effect in loaded] == ["Pulse", "Pulse"]
+    assert "const uint8_t fx_pulse[] PROGMEM" in text
+    assert "const uint8_t fx_pulse_2[] PROGMEM" in text
+
+
+def test_effect_bank_rejects_duplicate_ids_and_capacity_overflow(tmp_path):
+    black_frame = [[(0, 0, 0)] * 68]
+    duplicate_ids = [
+        ImportedEffect("One", black_frame, effect_id=4),
+        ImportedEffect("Two", black_frame, effect_id=4),
+    ]
+    with pytest.raises(ValueError, match="Duplicate effect ID 4"):
+        export_effect_bank(duplicate_ids, tmp_path / "duplicate.h")
+
+    too_large = [ImportedEffect("Large", black_frame * 3, effect_id=5)]
+    with pytest.raises(ValueError, match="exceeding"):
+        export_effect_bank(too_large, tmp_path / "large.h", max_bytes=500)

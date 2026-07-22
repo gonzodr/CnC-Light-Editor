@@ -5,8 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from cnc_light_editor.app import Editor
-from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect
-from cnc_light_editor.exporter import sample_project_frames
+from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect, parse_effect_data
+from cnc_light_editor.exporter import export_effect_bank, sample_project_frames
 from cnc_light_editor.model import Layer, Project, Shape
 
 
@@ -1192,3 +1192,77 @@ def test_inactive_layer_keyframes_remain_available_for_timeline_drawing():
 
     assert editor._inactive_layer_keyframe_times(editor.project.layers[0], active_shape) == {250}
     editor.draw()
+
+
+def test_export_toolbar_opens_visual_effect_bank_with_memory_blocks():
+    editor = make_editor()
+    editor._action("export")
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+
+    assert editor.export_bank_open is True
+    assert {
+        "export_bank_map", "export_bank_write", "export_bank_close",
+        "export_bank_select:-1", "export_bank_edit_name", "export_bank_edit_id",
+    } <= actions
+
+
+def test_effect_bank_maps_header_and_edits_imported_name_and_id(tmp_path):
+    black = [[(0, 0, 0)] * 68]
+    header = export_effect_bank(
+        [ImportedEffect("Mapped pulse", black * 2, effect_id=8)],
+        tmp_path / "effect_data.h",
+    )
+    editor = make_editor()
+    editor.project.effect_id = 1
+    editor.map_effect_bank_file(header)
+
+    assert editor.export_bank_effects[0].name == "Mapped pulse"
+    assert editor._export_bank_used_bytes() == editor.project.flash_bytes + 408
+    editor.export_bank_selected = 0
+    editor._export_bank_action("export_bank_edit_name")
+    editor.export_bank_name_input = "Renamed mapped effect"
+    assert editor._commit_export_bank_input() is True
+    editor._export_bank_action("export_bank_edit_id")
+    editor.export_bank_id_input = "9"
+    assert editor._commit_export_bank_input() is True
+
+    assert editor.export_bank_effects[0].name == "Renamed mapped effect"
+    assert editor.export_bank_effects[0].effect_id == 9
+
+
+def test_effect_bank_rejects_duplicate_id_and_exports_current_project_with_bank(tmp_path):
+    black = [[(0, 0, 0)] * 68]
+    editor = make_editor()
+    editor.project.name = "Current animation"
+    editor.project.effect_id = 4
+    editor.project.duration_ms = 50
+    editor.project.frame_ms = 50
+    editor.export_bank_effects = [ImportedEffect("Existing", black, effect_id=7)]
+    editor.export_bank_selected = 0
+    editor._export_bank_action("export_bank_edit_id")
+    editor.export_bank_id_input = "4"
+
+    assert editor._commit_export_bank_input() is False
+    assert "already used" in editor.export_bank_status
+
+    path = editor.export_effect_bank_file(tmp_path / "combined.h")
+    effects = parse_effect_data(path.read_text(encoding="utf-8"))
+    assert [(effect.effect_id, effect.name) for effect in effects] == [
+        (7, "Existing"), (4, "Current animation"),
+    ]
+
+
+def test_effect_bank_edits_current_export_name_and_id_as_undoable_project_settings():
+    editor = make_editor()
+    editor.export_bank_selected = -1
+    editor._export_bank_action("export_bank_edit_name")
+    editor.export_bank_name_input = "Firmware launch"
+    assert editor._commit_export_bank_input() is True
+    editor._export_bank_action("export_bank_edit_id")
+    editor.export_bank_id_input = "12"
+    assert editor._commit_export_bank_input() is True
+
+    assert (editor.project.name, editor.project.effect_id) == ("Firmware launch", 12)
+    editor._undo()
+    assert editor.project.effect_id == 1

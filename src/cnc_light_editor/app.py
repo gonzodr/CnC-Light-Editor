@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import os
 from pathlib import Path
@@ -12,7 +12,11 @@ import pygame
 
 from .engine import point_inside, render_leds, sample_gradient
 from .effect_importer import ImportedEffect, load_effect_data
-from .exporter import export_arduino_header
+from .exporter import (
+    EFFECT_BANK_CAPACITY,
+    export_effect_bank,
+    project_to_imported_effect,
+)
 from .ledmap import Led, LedMap
 from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
 
@@ -23,6 +27,10 @@ WINDOW_ICON = ROOT / "assets" / "CnC_LightE_ico.png"
 PALETTE = [
     (255, 70, 40), (255, 155, 20), (255, 230, 50), (80, 220, 90),
     (30, 180, 255), (90, 90, 255), (210, 80, 255), (255, 255, 255),
+]
+BANK_COLORS = [
+    (74, 151, 255), (118, 92, 246), (224, 82, 151), (255, 126, 64),
+    (244, 190, 55), (74, 198, 126), (48, 188, 202), (150, 104, 218),
 ]
 
 TOP_BAR = 54
@@ -97,6 +105,17 @@ class Editor:
         self.imported_effects: list[ImportedEffect] = []
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
+        self.export_bank_open = False
+        self.export_bank_effects: list[ImportedEffect] = []
+        self.export_bank_path: Path | None = None
+        self.export_bank_selected = -1
+        self.export_bank_scroll = 0
+        self.export_bank_name_editing = False
+        self.export_bank_name_input = ""
+        self.export_bank_id_editing = False
+        self.export_bank_id_input = ""
+        self.export_bank_input_select_all = False
+        self.export_bank_status = "Map an effect_data.h or export the current project"
         self.active_layer = 0
         self.selected: Shape | None = None
         self.drag_mode: str | None = None
@@ -208,6 +227,10 @@ class Editor:
     def handle_event(self, event: pygame.event.Event) -> None:
         canvas, panel, timeline = self.layout()
         viewport = pygame.Rect(TOOLBAR_WIDTH, TOP_BAR, panel.x - TOOLBAR_WIDTH, timeline.y - TOP_BAR)
+
+        if self.export_bank_open:
+            self._handle_export_bank_event(event)
+            return
 
         if event.type == pygame.KEYDOWN:
             if self.led_id_editing:
@@ -858,16 +881,7 @@ class Editor:
             self.playing = False
             self.status = "Back to project animation"
         elif action == "export":
-            errors = self.led_map.validate()
-            if errors:
-                self.status = "Export blocked: " + "; ".join(errors)
-            else:
-                try:
-                    export_arduino_header(self.project, self.led_map.export_slots(), EXPORT_FILE)
-                    mode = "CANVAS" if self.project.overlay else "FULL"
-                    self.status = f"V4 {mode}: {self.project.stored_frame_count} frames / {self.project.flash_bytes} bytes"
-                except (OSError, ValueError) as error:
-                    self.status = f"Export failed: {error}"
+            self._open_export_bank()
         elif action == "edit_led_id":
             self.led_name_editing = False
             self.led_name_input = self._current_led().name
@@ -2252,6 +2266,277 @@ class Editor:
         except Exception as error:
             self.status = f"Effect import failed: {error}"
 
+    def _open_export_bank(self) -> None:
+        self.export_bank_open = True
+        self.playing = False
+        self.export_bank_selected = -1
+        self.export_bank_scroll = 0
+        self.export_bank_name_editing = False
+        self.export_bank_id_editing = False
+        if not self.export_bank_effects and self.imported_effects and self.effect_data_path:
+            self.export_bank_effects = deepcopy(self.imported_effects)
+            self.export_bank_path = self.effect_data_path
+            self.export_bank_status = f"Mapped {len(self.export_bank_effects)} effects from {self.effect_data_path.name}"
+        else:
+            self.export_bank_status = "Effect Bank ready — current project is included"
+
+    def map_effect_bank_file(self, path: str | Path) -> None:
+        target = Path(path)
+        effects = load_effect_data(target)
+        self.export_bank_effects = deepcopy(effects)
+        self.export_bank_path = target.resolve()
+        self.export_bank_selected = 0 if effects else -1
+        self.export_bank_scroll = 0
+        self.export_bank_status = f"Mapped {len(effects)} effects from {target.name}"
+
+    def export_effect_bank_file(self, path: str | Path) -> Path:
+        led_errors = self.led_map.validate()
+        if led_errors:
+            raise ValueError("LED map: " + "; ".join(led_errors))
+        current = project_to_imported_effect(self.project, self.led_map.export_slots())
+        destination = export_effect_bank(
+            [*deepcopy(self.export_bank_effects), current],
+            path,
+            max_bytes=EFFECT_BANK_CAPACITY,
+        )
+        self.export_bank_path = destination.resolve()
+        self.export_bank_status = (
+            f"Exported {len(self.export_bank_effects) + 1} effects — "
+            f"{self._export_bank_used_bytes() / 1024:.1f} KiB"
+        )
+        self.status = f"Effect bank exported: {destination.name}"
+        return destination
+
+    def _choose_export_bank_map(self) -> None:
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            selected = filedialog.askopenfilename(
+                title="Map firmware effect_data.h",
+                initialdir=str(self.export_bank_path.parent if self.export_bank_path else ROOT),
+                filetypes=[("Arduino header", "*.h"), ("All files", "*.*")],
+            )
+            if selected:
+                self.map_effect_bank_file(selected)
+            else:
+                self.export_bank_status = "Header mapping cancelled"
+        except Exception as error:
+            self.export_bank_status = f"Mapping failed: {error}"
+        finally:
+            if root is not None:
+                root.destroy()
+
+    def _choose_export_bank_save(self) -> None:
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            default = self.export_bank_path or EXPORT_FILE
+            selected = filedialog.asksaveasfilename(
+                title="Export V4 effect bank",
+                initialdir=str(default.parent),
+                initialfile=default.name,
+                defaultextension=".h",
+                filetypes=[("Arduino header", "*.h"), ("All files", "*.*")],
+            )
+            if selected:
+                self.export_effect_bank_file(selected)
+            else:
+                self.export_bank_status = "Effect bank export cancelled"
+        except (OSError, ValueError) as error:
+            self.export_bank_status = f"Export blocked: {error}"
+        except Exception as error:
+            self.export_bank_status = f"Export failed: {error}"
+        finally:
+            if root is not None:
+                root.destroy()
+
+    def _export_bank_used_bytes(self) -> int:
+        return self.project.flash_bytes + sum(effect.flash_bytes for effect in self.export_bank_effects)
+
+    def _export_bank_validation_errors(self) -> list[str]:
+        ids = [self.project.effect_id, *(effect.effect_id for effect in self.export_bank_effects)]
+        duplicates = sorted({effect_id for effect_id in ids if ids.count(effect_id) > 1})
+        errors = [f"Duplicate ID {effect_id}" for effect_id in duplicates]
+        used = self._export_bank_used_bytes()
+        if used > EFFECT_BANK_CAPACITY:
+            errors.append(f"Over capacity by {(used - EFFECT_BANK_CAPACITY) / 1024:.1f} KiB")
+        if not self.project.name.strip() or any(not effect.name.strip() for effect in self.export_bank_effects):
+            errors.append("Every effect needs a name")
+        errors.extend(self.led_map.validate())
+        return errors
+
+    def _export_bank_selected_effect(self) -> ImportedEffect | None:
+        if 0 <= self.export_bank_selected < len(self.export_bank_effects):
+            return self.export_bank_effects[self.export_bank_selected]
+        return None
+
+    def _handle_export_bank_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN:
+            if self.export_bank_name_editing or self.export_bank_id_editing:
+                self._handle_export_bank_input(event)
+            elif event.key == pygame.K_ESCAPE:
+                self.export_bank_open = False
+                self.status = "Closed Effect Bank"
+            return
+        if event.type == pygame.MOUSEWHEEL:
+            panel = self._export_bank_panel_rect()
+            list_rect = pygame.Rect(panel.x + 26, panel.y + 224, panel.width - 398, panel.height - 294)
+            mouse = getattr(event, "pos", pygame.mouse.get_pos())
+            if list_rect.collidepoint(mouse):
+                visible = max(1, list_rect.height // 53)
+                maximum = max(0, len(self.export_bank_effects) + 1 - visible)
+                self.export_bank_scroll = max(0, min(maximum, self.export_bank_scroll - event.y))
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        if self.export_bank_name_editing or self.export_bank_id_editing:
+            if not self._commit_export_bank_input():
+                return
+        action = next(
+            (
+                action for rect, action, _label in reversed(self.buttons)
+                if action.startswith("export_bank_") and rect.collidepoint(event.pos)
+            ),
+            None,
+        )
+        if action:
+            self._export_bank_action(action)
+
+    def _export_bank_action(self, action: str) -> None:
+        if action == "export_bank_close":
+            self.export_bank_open = False
+            self.status = "Closed Effect Bank"
+        elif action == "export_bank_map":
+            self._choose_export_bank_map()
+        elif action == "export_bank_write":
+            errors = self._export_bank_validation_errors()
+            if errors:
+                self.export_bank_status = "Export blocked: " + " · ".join(errors)
+            else:
+                self._choose_export_bank_save()
+        elif action == "export_bank_edit_name":
+            effect = self._export_bank_selected_effect()
+            self.export_bank_name_input = effect.name if effect else self.project.name
+            self.export_bank_name_editing = True
+            self.export_bank_id_editing = False
+            self.export_bank_input_select_all = True
+        elif action == "export_bank_edit_id":
+            effect = self._export_bank_selected_effect()
+            self.export_bank_id_input = str(effect.effect_id if effect else self.project.effect_id)
+            self.export_bank_id_editing = True
+            self.export_bank_name_editing = False
+            self.export_bank_input_select_all = True
+        elif action == "export_bank_remove" and self.export_bank_selected >= 0:
+            removed = self.export_bank_effects.pop(self.export_bank_selected)
+            self.export_bank_selected = -1
+            self.export_bank_status = f"Removed {removed.name} from export bank"
+        elif action.startswith("export_bank_select:"):
+            self.export_bank_selected = int(action.split(":", 1)[1])
+            self.export_bank_name_editing = False
+            self.export_bank_id_editing = False
+
+    def _handle_export_bank_input(self, event: pygame.event.Event) -> None:
+        ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
+        if ctrl and event.key == pygame.K_a:
+            self.export_bank_input_select_all = True
+            return
+        if ctrl and event.key == pygame.K_v:
+            value = self._clipboard_text().strip()
+            if self.export_bank_id_editing:
+                value = "".join(character for character in value if character.isdigit())
+            if self.export_bank_input_select_all:
+                if self.export_bank_name_editing:
+                    self.export_bank_name_input = value[:40]
+                else:
+                    self.export_bank_id_input = value[:3]
+            elif self.export_bank_name_editing:
+                self.export_bank_name_input = (self.export_bank_name_input + value)[:40]
+            else:
+                self.export_bank_id_input = (self.export_bank_id_input + value)[:3]
+            self.export_bank_input_select_all = False
+            return
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+            self._commit_export_bank_input()
+            return
+        if event.key == pygame.K_ESCAPE:
+            self.export_bank_name_editing = False
+            self.export_bank_id_editing = False
+            return
+        if event.key == pygame.K_BACKSPACE:
+            if self.export_bank_input_select_all:
+                if self.export_bank_name_editing:
+                    self.export_bank_name_input = ""
+                else:
+                    self.export_bank_id_input = ""
+                self.export_bank_input_select_all = False
+            elif self.export_bank_name_editing:
+                self.export_bank_name_input = self.export_bank_name_input[:-1]
+            else:
+                self.export_bank_id_input = self.export_bank_id_input[:-1]
+            return
+        character = getattr(event, "unicode", "")
+        if self.export_bank_name_editing and character.isprintable():
+            if self.export_bank_input_select_all:
+                self.export_bank_name_input = ""
+                self.export_bank_input_select_all = False
+            self.export_bank_name_input = (self.export_bank_name_input + character)[:40]
+        elif self.export_bank_id_editing and character.isdigit():
+            if self.export_bank_input_select_all:
+                self.export_bank_id_input = ""
+                self.export_bank_input_select_all = False
+            self.export_bank_id_input = (self.export_bank_id_input + character)[:3]
+
+    def _commit_export_bank_input(self) -> bool:
+        effect = self._export_bank_selected_effect()
+        if self.export_bank_name_editing:
+            name = self.export_bank_name_input.strip()
+            if not name:
+                self.export_bank_status = "Effect name cannot be empty"
+                return False
+            if effect:
+                self.export_bank_effects[self.export_bank_selected] = replace(effect, name=name)
+            else:
+                self._begin_change()
+                self.project.name = name
+                self._commit_change()
+            self.export_bank_name_editing = False
+            self.export_bank_status = f"Effect renamed to {name}"
+            return True
+        if self.export_bank_id_editing:
+            if not self.export_bank_id_input:
+                self.export_bank_status = "Effect ID must be between 1 and 255"
+                return False
+            effect_id = int(self.export_bank_id_input)
+            if not 1 <= effect_id <= 255:
+                self.export_bank_status = "Effect ID must be between 1 and 255"
+                return False
+            used = {self.project.effect_id}
+            used.update(
+                item.effect_id for index, item in enumerate(self.export_bank_effects)
+                if index != self.export_bank_selected
+            )
+            if effect_id in used and (effect is not None or effect_id != self.project.effect_id):
+                self.export_bank_status = f"Effect ID {effect_id} is already used"
+                return False
+            if effect:
+                self.export_bank_effects[self.export_bank_selected] = replace(effect, effect_id=effect_id)
+            else:
+                self._begin_change()
+                self.project.effect_id = effect_id
+                self._commit_change()
+            self.export_bank_id_editing = False
+            self.export_bank_status = f"Firmware effect ID: {effect_id}"
+            return True
+        return True
+
     def _move_selected_led(self, pos: tuple[int, int], canvas: pygame.Rect) -> None:
         x, y = self._screen_to_world(pos, canvas)
         led = self._current_led()
@@ -2631,6 +2916,8 @@ class Editor:
             label = self.small.render(self.tool_drag.title(), True, (235, 240, 250))
             self.screen.blit(label, (mouse[0] + 22, mouse[1] - 8))
         self._draw_context_menu()
+        if self.export_bank_open:
+            self._draw_export_bank()
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -3698,6 +3985,182 @@ class Editor:
         for tip in tips:
             self.screen.blit(self.small.render(tip, True, (168, 173, 188)), (x, y)); y += 21
         self.screen.blit(self.small.render(self.status, True, (95, 215, 160)), (x, panel.bottom - 28))
+
+    def _export_bank_panel_rect(self) -> pygame.Rect:
+        width = min(1120, self.screen.get_width() - 50)
+        height = min(720, self.screen.get_height() - 50)
+        panel = pygame.Rect(0, 0, width, height)
+        panel.center = self.screen.get_rect().center
+        return panel
+
+    def _draw_export_bank(self) -> None:
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((7, 9, 13, 218))
+        self.screen.blit(shade, (0, 0))
+        panel = self._export_bank_panel_rect()
+        pygame.draw.rect(self.screen, (25, 28, 36), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (77, 84, 102), panel, 1, border_radius=10)
+        x, y = panel.x + 26, panel.y + 21
+        self.screen.blit(self.title.render("EFFECT BANK / EXPORT", True, (238, 241, 248)), (x, y))
+        subtitle = self.small.render("V4 baked RGB memory planner · fixed 150 KiB budget", True, (143, 153, 174))
+        self.screen.blit(subtitle, (x, y + 31))
+        self._button(pygame.Rect(panel.right - 344, y, 126, 32), "export_bank_map", "Map header…", False)
+        errors = self._export_bank_validation_errors()
+        self._button(
+            pygame.Rect(panel.right - 210, y, 126, 32), "export_bank_write",
+            "Export bank…", not errors,
+        )
+        self._button(pygame.Rect(panel.right - 76, y, 50, 32), "export_bank_close", "×", False)
+
+        used = self._export_bank_used_bytes()
+        free = max(0, EFFECT_BANK_CAPACITY - used)
+        frame_ms = max(1, int(self.project.frame_ms or 50))
+        free_seconds = (free // 204) * frame_ms / 1000.0
+        capacity_y = panel.y + 83
+        summary = (
+            f"{used / 1024:.1f} KiB used  /  {EFFECT_BANK_CAPACITY / 1024:.0f} KiB   ·   "
+            f"{free / 1024:.1f} KiB free   ·   ≈{free_seconds:.1f}s at {1000 / frame_ms:.2f} FPS"
+        )
+        summary_color = (255, 104, 92) if used > EFFECT_BANK_CAPACITY else (104, 221, 165)
+        self.screen.blit(self.font.render(summary, True, summary_color), (x, capacity_y))
+        memory = pygame.Rect(x, capacity_y + 31, panel.width - 52, 42)
+        pygame.draw.rect(self.screen, (40, 44, 54), memory, border_radius=6)
+        pygame.draw.rect(
+            self.screen,
+            (255, 104, 92) if used > EFFECT_BANK_CAPACITY else (87, 94, 112),
+            memory, 2 if used > EFFECT_BANK_CAPACITY else 1, border_radius=6,
+        )
+        entries = [
+            (-1, self.project.name, self.project.flash_bytes),
+            *[(index, effect.name, effect.flash_bytes) for index, effect in enumerate(self.export_bank_effects)],
+        ]
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(memory.inflate(-2, -2))
+        cursor = memory.x + 2
+        usable_width = memory.width - 4
+        for order, (index, name, byte_count) in enumerate(entries):
+            width = max(3, round(byte_count / EFFECT_BANK_CAPACITY * usable_width))
+            block = pygame.Rect(cursor, memory.y + 2, width, memory.height - 4)
+            color = BANK_COLORS[order % len(BANK_COLORS)]
+            pygame.draw.rect(self.screen, color, block)
+            if index == self.export_bank_selected:
+                pygame.draw.rect(self.screen, (255, 255, 255), block, 2)
+            self.buttons.append((block, f"export_bank_select:{index}", name))
+            cursor += width
+        self.screen.set_clip(old_clip)
+
+        mapped = str(self.export_bank_path) if self.export_bank_path else "No effect_data.h mapped — export defaults to exports/effect_data.h"
+        self.screen.blit(
+            self.small.render(self._fit_text(mapped, self.small, panel.width - 52), True, (129, 138, 158)),
+            (x, memory.bottom + 12),
+        )
+
+        list_rect = pygame.Rect(x, panel.y + 224, panel.width - 398, panel.height - 294)
+        detail = pygame.Rect(list_rect.right + 18, list_rect.y, panel.right - list_rect.right - 44, list_rect.height)
+        self.screen.blit(self.font.render("BANK CONTENT", True, (211, 216, 228)), (list_rect.x, list_rect.y - 29))
+        self.screen.blit(self.font.render("SELECTED EFFECT", True, (211, 216, 228)), (detail.x, detail.y - 29))
+        pygame.draw.rect(self.screen, (20, 23, 30), list_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (20, 23, 30), detail, border_radius=6)
+        pygame.draw.rect(self.screen, (57, 63, 77), list_rect, 1, border_radius=6)
+        pygame.draw.rect(self.screen, (57, 63, 77), detail, 1, border_radius=6)
+
+        visible = max(1, list_rect.height // 53)
+        maximum_scroll = max(0, len(entries) - visible)
+        self.export_bank_scroll = min(self.export_bank_scroll, maximum_scroll)
+        for visible_index, (entry_index, name, byte_count) in enumerate(
+            entries[self.export_bank_scroll:self.export_bank_scroll + visible]
+        ):
+            absolute_order = self.export_bank_scroll + visible_index
+            row = pygame.Rect(list_rect.x + 7, list_rect.y + 7 + visible_index * 53, list_rect.width - 14, 46)
+            selected = entry_index == self.export_bank_selected
+            pygame.draw.rect(self.screen, (47, 58, 78) if selected else (31, 35, 44), row, border_radius=5)
+            color = BANK_COLORS[absolute_order % len(BANK_COLORS)]
+            bar_width = max(3, round(byte_count / EFFECT_BANK_CAPACITY * (row.width - 8)))
+            pygame.draw.rect(self.screen, color, (row.x + 4, row.bottom - 7, min(row.width - 8, bar_width), 3), border_radius=2)
+            if entry_index == -1:
+                effect_id, frames, timing = self.project.effect_id, self.project.stored_frame_count, int(self.project.frame_ms or 1)
+                marker = "CURRENT"
+            else:
+                effect = self.export_bank_effects[entry_index]
+                effect_id, frames, timing = effect.effect_id, len(effect.frames), effect.frame_ms
+                marker = "BANK"
+            label = self._fit_text(f"{marker}  ·  ID {effect_id}  ·  {name}", self.small, row.width - 178)
+            self.screen.blit(self.small.render(label, True, (232, 235, 242)), (row.x + 9, row.y + 7))
+            stats = f"{byte_count / 1024:.1f}K  {frames * timing / 1000:.2f}s"
+            stats_surface = self.small.render(stats, True, (159, 168, 187))
+            self.screen.blit(stats_surface, (row.right - stats_surface.get_width() - 9, row.y + 7))
+            self.buttons.append((row, f"export_bank_select:{entry_index}", name))
+
+        self._draw_export_bank_details(detail)
+        status_color = (255, 110, 98) if errors else (102, 218, 163)
+        status = " · ".join(errors) if errors else self.export_bank_status
+        self.screen.blit(
+            self.small.render(self._fit_text(status, self.small, panel.width - 52), True, status_color),
+            (x, panel.bottom - 37),
+        )
+
+    def _draw_export_bank_details(self, detail: pygame.Rect) -> None:
+        effect = self._export_bank_selected_effect()
+        current = effect is None
+        name = self.project.name if current else effect.name
+        effect_id = self.project.effect_id if current else effect.effect_id
+        frames = self.project.stored_frame_count if current else len(effect.frames)
+        frame_ms = int(self.project.frame_ms or 1) if current else effect.frame_ms
+        loops = self.project.loops if current else effect.loops
+        loop_frames = self.project.normalized_loop_frames if current else effect.normalized_loop_frames
+        overlay = self.project.overlay if current else effect.overlay
+        byte_count = self.project.flash_bytes if current else effect.flash_bytes
+        x, y = detail.x + 14, detail.y + 16
+        badge = "CURRENT PROJECT" if current else "MAPPED HEADER EFFECT"
+        self.screen.blit(self.small.render(badge, True, BANK_COLORS[0 if current else (self.export_bank_selected + 1) % len(BANK_COLORS)]), (x, y))
+        y += 35
+        self.screen.blit(self.small.render("Name", True, (143, 152, 171)), (x, y))
+        name_field = pygame.Rect(x, y + 18, detail.width - 28, 34)
+        pygame.draw.rect(self.screen, (42, 47, 58), name_field, border_radius=4)
+        pygame.draw.rect(self.screen, ACCENT if self.export_bank_name_editing else (74, 81, 98), name_field, 1, border_radius=4)
+        name_value = self.export_bank_name_input if self.export_bank_name_editing else name
+        if self.export_bank_name_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            name_value += "|"
+        self.screen.blit(self.small.render(self._fit_text(name_value, self.small, name_field.width - 16), True, (238, 241, 247)), (name_field.x + 8, name_field.y + 9))
+        self.buttons.append((name_field, "export_bank_edit_name", "Effect name"))
+        y += 67
+        self.screen.blit(self.small.render("Firmware ID", True, (143, 152, 171)), (x, y))
+        id_field = pygame.Rect(x, y + 18, 104, 34)
+        pygame.draw.rect(self.screen, (42, 47, 58), id_field, border_radius=4)
+        pygame.draw.rect(self.screen, ACCENT if self.export_bank_id_editing else (74, 81, 98), id_field, 1, border_radius=4)
+        id_value = self.export_bank_id_input if self.export_bank_id_editing else str(effect_id)
+        if self.export_bank_id_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            id_value += "|"
+        self.screen.blit(self.font.render(id_value, True, (238, 241, 247)), (id_field.x + 10, id_field.y + 6))
+        self.buttons.append((id_field, "export_bank_edit_id", "Firmware effect ID"))
+        y += 75
+        metadata = [
+            ("Stored frames", f"{frames}"),
+            ("Frame time", f"{frame_ms} ms  /  {1000 / frame_ms:.2f} FPS"),
+            ("Stored duration", f"{frames * frame_ms / 1000:.2f} s"),
+            ("Flash", f"{byte_count / 1024:.2f} KiB"),
+            ("Loop / outro", f"{loop_frames} loop frames  ×{loops}"),
+            ("Canvas mode", "OVERLAY" if overlay else "FULL"),
+        ]
+        for label, value in metadata:
+            self.screen.blit(self.small.render(label, True, (132, 141, 160)), (x, y))
+            rendered = self.small.render(value, True, (220, 225, 235))
+            self.screen.blit(rendered, (detail.right - rendered.get_width() - 14, y))
+            y += 28
+        if not current:
+            self._button(
+                pygame.Rect(x, detail.bottom - 48, detail.width - 28, 32),
+                "export_bank_remove", "Remove from export bank", False,
+            )
+
+    @staticmethod
+    def _fit_text(value: str, font: pygame.font.Font, max_width: int) -> str:
+        if font.size(value)[0] <= max_width:
+            return value
+        suffix = "…"
+        while value and font.size(value + suffix)[0] > max_width:
+            value = value[:-1]
+        return value + suffix
 
     def _draw_context_menu(self) -> None:
         items = self._context_menu_items()

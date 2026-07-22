@@ -27,6 +27,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál. A `NULL` slot RGB-je fekete.
 - JSON projektmentés és visszatöltés.
 - A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops`, `loopFrames` és `overlay` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
+- Külön Effect Bank / Export ablak a meglévő `effect_data.h` feltérképezéséhez, több effekt együttes újraexportálásához és a fix 150 KiB flash-keret vizuális tervezéséhez.
 
 ## Telepítés Windows alatt
 
@@ -79,7 +80,9 @@ cnc-light-editor
 - Projektmentés/betöltés: `Ctrl+S`, `Ctrl+O`; Save As: `Ctrl+Shift+S`. Az első mentés fájlnevet kér, a további mentések ugyanazt a `.cnclight` fájlt frissítik.
 - A jobb oldali színminták az aktuális playheadnél hoznak létre szín-keyframe-et. Többszörös keyframe-kijelölésnél a kiválasztott szín minden kijelölt időpontra egyszerre kerül rá.
 
-A toolbar `Export` gombja az `exports/effect_data.h` fájlt generálja. A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
+A toolbar `Export` gombja az Effect Bank ablakot nyitja meg. A `Map header…` beolvassa egy meglévő V4 `effect_data.h` összes effektjét; a felső szegmentált memóriasáv és az effektenkénti színes hosszcsíkok a tényleges `frames × 204` flash-foglalást mutatják. A panel kijelzi a 150 KiB keretből felhasznált és szabad helyet, valamint az aktuális projekt FPS-ével becsült hátralévő animációs időt. Egy blokkra kattintva a név és az explicit firmware-ID szerkeszthető, a mappelt effekt eltávolítható az exportbankból. Az aktuális projekt mindig külön `CURRENT` blokként szerepel, és a saját exportnevét/ID-ját ugyanitt lehet beállítani. Az `Export bank…` egy közös, firmware-kész V4 headert ír; duplikált ID, hibás LED-map vagy 150 KiB fölötti adat esetén blokkolja az exportot.
+
+A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
 
 A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a `bakedEffects[]` leírókat, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
