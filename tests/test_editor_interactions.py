@@ -1291,9 +1291,62 @@ def test_random_led_panel_exposes_requested_parameters():
     actions = {action for _rect, action, _label in editor.buttons}
 
     assert {
-        "random_led_seed:-1", "random_led_life:50", "random_led_birth:1",
-        "random_led_count:1", "random_led_toggle", "random_led_keyframe",
+        "random_led_field:seed", "random_led_field:life_ms",
+        "random_led_field:born_speed", "random_led_field:particle_count",
+        "random_led_field:opacity", "random_led_toggle", "random_led_keyframe",
+        "random_led_opacity_keyframe",
     } <= actions
+
+    editor.current_ms = 350
+    editor._action("random_led_opacity_keyframe")
+    effect = editor._active_random_led_effect()
+    assert editor.selected_keyframes == {(effect.id, "opacity", 350)}
+    assert effect.keyframes["opacity"][0].value == 1.0
+
+
+def test_random_led_parameters_support_mouse_scrubbing_and_typed_input():
+    editor = make_editor()
+    editor._action("random_led_editor")
+    editor.current_ms = 500
+    editor.draw()
+    opacity_field = next(
+        rect for rect, action, _label in editor.buttons
+        if action == "random_led_field:opacity"
+    )
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": opacity_field.center},
+    ))
+    dragged = (opacity_field.centerx - 40, opacity_field.centery)
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION, {"pos": dragged, "rel": (-40, 0), "buttons": (1, 0, 0)},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"button": 1, "pos": dragged},
+    ))
+
+    effect = editor._active_random_led_effect()
+    assert effect.value_at("opacity", 500) == 0.8
+    assert editor.selected_keyframes == {(effect.id, "opacity", 500)}
+
+    editor.draw()
+    life_field = next(
+        rect for rect, action, _label in editor.buttons
+        if action == "random_led_field:life_ms"
+    )
+    for event_type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+        editor.handle_event(pygame.event.Event(
+            event_type, {"button": 1, "pos": life_field.center},
+        ))
+    assert editor.random_effect_editing == "life_ms"
+    editor.random_effect_input = "750"
+    editor._handle_random_effect_input(pygame.event.Event(
+        pygame.KEYDOWN,
+        {"key": pygame.K_RETURN, "mod": 0, "unicode": "\r"},
+    ))
+
+    assert effect.life_ms == 750
+    assert editor.random_effect_editing is None
 
 
 def test_random_led_preview_matches_firmware_order_export():

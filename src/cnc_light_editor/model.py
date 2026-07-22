@@ -35,6 +35,7 @@ class RandomLedEffect:
     born_speed: float = 8.0
     particle_count: int = 8
     color: Color = (255, 230, 80)
+    opacity: float = 1.0
     id: str = field(default_factory=lambda: uuid4().hex[:10])
     keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
 
@@ -48,12 +49,21 @@ class RandomLedEffect:
         frames = self.keyframes.get(prop, [])
         if not frames:
             return getattr(self, prop)
-        value = frames[0].value
-        for frame in frames:
+        if time_ms < frames[0].time_ms:
+            return frames[0].value
+        before = frames[0]
+        after = None
+        for frame in frames[1:]:
             if frame.time_ms > time_ms:
+                after = frame
                 break
-            value = frame.value
-        return value
+            before = frame
+        if after is None or prop != "opacity":
+            return before.value
+        span = after.time_ms - before.time_ms
+        amount = 0.0 if span == 0 else (time_ms - before.time_ms) / span
+        amount = _ease(amount, after.easing, after.bezier)
+        return _lerp(before.value, after.value, amount)
 
 
 @dataclass

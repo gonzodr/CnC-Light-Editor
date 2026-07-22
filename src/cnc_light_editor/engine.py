@@ -108,6 +108,9 @@ def _random_led_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, 
     for effect in layer.effects:
         if not effect.value_at("enabled", time_ms) or effect.born_speed <= 0 or effect.particle_count <= 0:
             continue
+        effect_opacity = max(0.0, min(1.0, float(effect.value_at("opacity", time_ms))))
+        if effect_opacity <= 0.0:
+            continue
         interval = 1000.0 / effect.born_speed
         life_ms = max(1, effect.life_ms)
         last_birth = max(0, int(time_ms // interval))
@@ -122,7 +125,7 @@ def _random_led_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, 
             led_index = eligible[generator.randrange(len(eligible))]
             brightness[led_index] = max(brightness.get(led_index, 0.0), 1.0 - age / life_ms)
         for led_index, alpha in brightness.items():
-            overlays[led_index].append((effect.color, alpha))
+            overlays[led_index].append((effect.color, alpha * effect_opacity))
     return overlays
 
 

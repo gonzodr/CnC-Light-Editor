@@ -18,7 +18,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Linear, Ease In, Ease Out és Ease In/Out interpoláció, kijelölhető keyframe-ek és idővonalas lejátszás.
 - Fill/stroke alakzatmód, állítható körvonalvastagság, keyframe-elhető peremlágyítás (Feather) és pozitív/negatív Mask Expansion.
 - Solid, tetszőleges számú húzható színstoppal szerkeszthető Linear és Radial gradient fill; a Radial lehet sugárirányú vagy forgásirányú, a Linear iránya és az Angular kezdőfázisa 0–360° között állítható.
-- Layer-szintű, shape-független Random LED / Sparkle effekt determinisztikus seeddel, life, born speed, maximális aktív elemszám és szín paraméterekkel. Az enabled állapot keyframe-elhető.
+- Layer-szintű, shape-független Random LED / Sparkle effekt determinisztikus seeddel, life, born speed, maximális aktív elemszám, szín és interpolálható opacity paraméterekkel. Az enabled állapot és az opacity keyframe-elhető.
 - Edit nézet: a DXF-ből képzett fehér vonalas guide jelenik meg sötét háttéren.
 - Stencil mód: nagy, additívan keveredő fényforrások világítanak az alfa-lyukas playfield artwork mögött.
 - Kalibrációs nézet húzható, hozzáadható és törölhető LED-helyekkel, beírható firmware-ID-vel, LED-nevekkel és ütközésmentes indexcserével.
@@ -73,7 +73,7 @@ cnc-light-editor
 - Feather és Mask Expansion: a Transform mezőkben százalékosan húzhatók vagy beírhatók. A Feather `0–10%` között lágyítja a maszk mindkét szélét, az Expansion `−10–+10%` között összehúzza vagy kitágítja. Mindkettő keyframe-elhető, és a lágyított LED-fényerő kerül a firmware-exportba is.
 - Gradient: Fill módban nyisd meg a `Gradient fill…` panelt. Kattints a colorbarra új stophoz, húzd a stopokat, majd adj színt a kijelölt stopnak. A Solid/Linear/Radial mód, a Radial `Radius/Angular` iránya, valamint a Linear angle és az Angular phase ugyanitt állítható.
 - Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A `FULL/CANVAS` exportkapcsoló adja az `overlay` flaget; a panel élő flash- és lejátszási időbecslést mutat. A Layers fejléc `C+` gombja egyetlen, speciális Canvas réteget ad a projekthez. A Canvas kijelölésekor az Inspector `Enable key` és `Disable key` gombjai az aktuális playheadnél explicit állapot-keyframe-et írnak: Enable esetén az érintetlen LED-ek átlátszóak, Disable esetén fekete blackout értéket kapnak. A timeline ON/OFF gombja és a `V` gyorsbillentyű a két állapot között vált.
-- Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. A Toggle az aktuális időnél keyframe-et hoz létre, a `+ Key` megtartja az aktuális enabled állapotot.
+- Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. Minden numerikus mező vízszintesen húzható, rövid kattintás után pedig közvetlenül beírható; a számbevitel támogatja a `Ctrl+A` és `Ctrl+V` műveleteket. A Toggle az aktuális időnél állapotot vált, a `State key` megtartja az aktuális enabled állapotot. Az opacity mező `+K` gombja explicit opacity-keyframe-et ír, míg az opacity későbbi playheadnél történő húzása vagy beírása automatikusan keyframe-et készít.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; aktív layer duplikálása: `Ctrl+D`.
 - Hotkey súgó: a felső `?` gomb vagy `F1`; bezárás: `Esc`, `F1` vagy az ablak `×` gombja.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.

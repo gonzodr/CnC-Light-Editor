@@ -153,6 +153,10 @@ class Editor:
         self.gradient_editor_open = False
         self.selected_gradient_stop_id: str | None = None
         self.random_led_editor_open = False
+        self.random_effect_editing: str | None = None
+        self.random_effect_input = ""
+        self.random_effect_input_select_all = False
+        self.random_effect_drag_start: float | int | None = None
         self.imported_effects: list[ImportedEffect] = []
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
@@ -312,6 +316,9 @@ class Editor:
             if self.stroke_editing:
                 self._handle_stroke_input(event)
                 return
+            if self.random_effect_editing:
+                self._handle_random_effect_input(event)
+                return
             if self.property_editing:
                 self._handle_property_input(event)
                 return
@@ -342,6 +349,9 @@ class Editor:
             if event.button == 1 and self.property_editing:
                 self.property_editing = None
                 self.property_input_select_all = False
+            if event.button == 1 and self.random_effect_editing:
+                self.random_effect_editing = None
+                self.random_effect_input_select_all = False
             if event.button == 3:
                 self.context_menu_pos = None
                 if timeline.collidepoint(event.pos) and not self._active_imported_effect():
@@ -398,6 +408,19 @@ class Editor:
                         self.drag_origin = event.pos
                         self.drag_shape_state = dict(self.selected.state_at(self.current_ms))
                         self._begin_change()
+                    elif action.startswith("random_led_field:"):
+                        effect = self._active_random_led_effect()
+                        if effect:
+                            prop = action.split(":", 1)[1]
+                            self.random_effect_editing = None
+                            self.random_effect_input_select_all = False
+                            self.scrub_prop = prop
+                            self.drag_mode = "random_led_scrub"
+                            self.drag_origin = event.pos
+                            self.random_effect_drag_start = self._random_effect_parameter_value(
+                                effect, prop, self.current_ms,
+                            )
+                            self._begin_change()
                     elif action.startswith("gradient_stop:") and self.selected:
                         self.selected_gradient_stop_id = action.split(":", 1)[1]
                         self.drag_mode = "gradient_stop"
@@ -528,6 +551,11 @@ class Editor:
                     }
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
+                open_random_effect_input = (
+                    self.drag_mode == "random_led_scrub"
+                    and self.scrub_prop is not None
+                    and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
+                )
                 if not self.duration_editing:
                     self._commit_change()
                 if open_stroke_input and self.selected:
@@ -546,9 +574,12 @@ class Editor:
                     )
                     self.property_input_select_all = True
                     self.status = f"Type {TIMELINE_PROPERTY_LABELS[prop]}, then press Enter"
+                elif open_random_effect_input and self.scrub_prop:
+                    self._open_random_effect_input(self.scrub_prop)
                 self.drag_mode = None
                 self.scrub_prop = None
                 self.drag_key_time = None
+                self.random_effect_drag_start = None
             return
 
         if event.type == pygame.MOUSEMOTION:
@@ -570,6 +601,8 @@ class Editor:
                 self._move_selected_led(event.pos, canvas)
             elif self.drag_mode == "scrub":
                 self._scrub_property(event.pos[0])
+            elif self.drag_mode == "random_led_scrub":
+                self._scrub_random_effect_parameter(event.pos[0])
             elif self.drag_mode == "gradient_stop":
                 self._move_gradient_stop(event.pos[0])
             elif self.drag_mode == "gradient_angle":
@@ -712,7 +745,8 @@ class Editor:
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
                 "set_loop_end", "clear_loop_end", "toggle_overlay",
                 "gradient_add_stop", "gradient_delete_stop",
-                "random_led_toggle", "random_led_keyframe", "random_led_seed:-1", "random_led_seed:1",
+                "random_led_toggle", "random_led_keyframe", "random_led_opacity_keyframe",
+                "random_led_seed:-1", "random_led_seed:1",
                 "random_led_life:-50", "random_led_life:50", "random_led_birth:-1", "random_led_birth:1",
                 "random_led_count:-1", "random_led_count:1", "random_led_delete",
             }
@@ -891,11 +925,15 @@ class Editor:
                 self.project.layers[self.active_layer].effects.append(effect)
                 self._commit_change()
             self.random_led_editor_open = True
+            self.random_effect_editing = None
+            self.random_effect_input_select_all = False
             self.gradient_editor_open = False
             self.selected_keyframes.clear()
             self.status = "Random LED — deterministic flashes independent from layer shapes"
         elif action == "random_led_back":
             self.random_led_editor_open = False
+            self.random_effect_editing = None
+            self.random_effect_input_select_all = False
             self.status = "Random LED changes applied"
         elif action == "random_led_delete":
             effect = self._active_random_led_effect()
@@ -905,6 +943,8 @@ class Editor:
                     key for key in self.selected_keyframes if key[0] != effect.id
                 }
             self.random_led_editor_open = False
+            self.random_effect_editing = None
+            self.random_effect_input_select_all = False
             self.status = "Random LED effect removed from layer"
         elif action == "random_led_toggle":
             effect = self._active_random_led_effect()
@@ -923,6 +963,14 @@ class Editor:
                 effect.add_keyframe("enabled", self.current_ms, value)
                 self.selected_keyframes = {(effect.id, "enabled", self.current_ms)}
                 self.status = f"Random LED enabled keyframe at {self.current_ms} ms"
+        elif action == "random_led_opacity_keyframe":
+            effect = self._active_random_led_effect()
+            if effect:
+                value = float(effect.value_at("opacity", self.current_ms))
+                effect.add_keyframe("opacity", self.current_ms, value)
+                self.selected_keyframes = {(effect.id, "opacity", self.current_ms)}
+                self.timeline_expanded_layers.add(self.project.layers[self.active_layer].id)
+                self.status = f"Random LED opacity keyframe at {self.current_ms} ms"
         elif action.startswith("random_led_seed:"):
             effect = self._active_random_led_effect()
             if effect:
@@ -2246,6 +2294,97 @@ class Editor:
             value = round(value / step) * step
         self._set_animated(prop, value)
 
+    @staticmethod
+    def _random_effect_parameter_value(
+        effect: RandomLedEffect, prop: str, time_ms: int | None = None,
+    ) -> float | int:
+        if prop == "opacity" and time_ms is not None:
+            return float(effect.value_at(prop, time_ms))
+        return getattr(effect, prop)
+
+    @staticmethod
+    def _normalize_random_effect_parameter(prop: str, value: float) -> float | int:
+        if prop == "seed":
+            return max(0, min(2147483647, int(round(value))))
+        if prop == "life_ms":
+            return max(50, min(10000, int(round(value))))
+        if prop == "born_speed":
+            return round(max(0.5, min(100.0, float(value))), 1)
+        if prop == "particle_count":
+            return max(1, min(68, int(round(value))))
+        if prop == "opacity":
+            return round(max(0.0, min(1.0, float(value))), 4)
+        raise ValueError(f"Unknown Random LED parameter: {prop}")
+
+    def _set_random_effect_parameter(
+        self, effect: RandomLedEffect, prop: str, value: float,
+    ) -> float | int:
+        normalized = self._normalize_random_effect_parameter(prop, value)
+        if prop == "opacity":
+            if self.current_ms == 0 and not effect.keyframes.get(prop):
+                effect.opacity = float(normalized)
+                self.selected_keyframes.clear()
+            else:
+                effect.add_keyframe(prop, self.current_ms, float(normalized))
+                self.selected_keyframes = {(effect.id, prop, self.current_ms)}
+                self.timeline_expanded_layers.add(self.project.layers[self.active_layer].id)
+        else:
+            setattr(effect, prop, normalized)
+        return normalized
+
+    def _scrub_random_effect_parameter(self, screen_x: int) -> None:
+        effect = self._active_random_led_effect()
+        if not effect or not self.scrub_prop or self.random_effect_drag_start is None:
+            return
+        prop = self.scrub_prop
+        sensitivities = {
+            "seed": 1.0,
+            "life_ms": 5.0,
+            "born_speed": 0.1,
+            "particle_count": 0.2,
+            "opacity": 0.005,
+        }
+        value = float(self.random_effect_drag_start) + (
+            screen_x - self.drag_origin[0]
+        ) * sensitivities[prop]
+        normalized = self._set_random_effect_parameter(effect, prop, value)
+        self.status = self._random_effect_parameter_status(prop, normalized)
+
+    def _open_random_effect_input(self, prop: str) -> None:
+        effect = self._active_random_led_effect()
+        if not effect:
+            return
+        value = self._random_effect_parameter_value(effect, prop, self.current_ms)
+        self.random_effect_editing = prop
+        self.random_effect_input = (
+            f"{float(value) * 100:.1f}" if prop == "opacity"
+            else f"{float(value):g}" if prop == "born_speed"
+            else str(int(value))
+        )
+        self.random_effect_input_select_all = True
+        self.status = f"Type {self._random_effect_parameter_label(prop)}, then press Enter"
+
+    @staticmethod
+    def _random_effect_parameter_label(prop: str) -> str:
+        return {
+            "seed": "Random seed",
+            "life_ms": "Life",
+            "born_speed": "Born speed",
+            "particle_count": "Max active",
+            "opacity": "Opacity",
+        }[prop]
+
+    @staticmethod
+    def _random_effect_parameter_status(prop: str, value: float | int) -> str:
+        label = Editor._random_effect_parameter_label(prop)
+        if prop == "life_ms":
+            return f"{label}: {int(value)} ms"
+        if prop == "born_speed":
+            return f"{label}: {float(value):g} / sec"
+        if prop == "opacity":
+            return f"{label}: {float(value) * 100:.1f}%"
+        return f"{label}: {int(value)}"
+
     def _set_animated(self, prop: str, value) -> None:
         if not self.selected:
             return
@@ -2372,6 +2511,9 @@ class Editor:
         self.calibration = False
         self.gradient_editor_open = False
         self.random_led_editor_open = False
+        self.random_effect_editing = None
+        self.random_effect_input_select_all = False
+        self.random_effect_drag_start = None
         self.export_bank_open = False
         self.help_open = False
         self.property_editing = None
@@ -3060,6 +3202,80 @@ class Editor:
             if character in ".," and any(mark in self.stroke_input for mark in ".,"):
                 return
             self.stroke_input += character
+
+    def _handle_random_effect_input(self, event: pygame.event.Event) -> None:
+        prop = self.random_effect_editing
+        effect = self._active_random_led_effect()
+        if not prop or not effect:
+            self.random_effect_editing = None
+            return
+        ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
+        if ctrl and event.key == pygame.K_a:
+            self.random_effect_input_select_all = True
+            self.status = f"{self._random_effect_parameter_label(prop)} value selected"
+            return
+        if ctrl and event.key == pygame.K_v:
+            pasted = self._clipboard_text().strip().replace(",", ".")
+            try:
+                float(pasted)
+            except ValueError:
+                self.status = "Clipboard does not contain a valid number"
+                return
+            self.random_effect_input = pasted[:12] if self.random_effect_input_select_all else (
+                self.random_effect_input + pasted
+            )[:12]
+            self.random_effect_input_select_all = False
+            self.status = f"Pasted {self._random_effect_parameter_label(prop)} — press Enter"
+            return
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+            try:
+                entered = float(self.random_effect_input.replace(",", "."))
+            except ValueError:
+                self.status = f"{self._random_effect_parameter_label(prop)} must be a number"
+                return
+            input_limits = {
+                "seed": (0.0, 2147483647.0),
+                "life_ms": (50.0, 10000.0),
+                "born_speed": (0.5, 100.0),
+                "particle_count": (1.0, 68.0),
+                "opacity": (0.0, 100.0),
+            }
+            low, high = input_limits[prop]
+            if not low <= entered <= high:
+                self.status = (
+                    f"{self._random_effect_parameter_label(prop)} must be {low:g}–{high:g}"
+                )
+                return
+            value = entered / 100.0 if prop == "opacity" else entered
+            self._begin_change()
+            normalized = self._set_random_effect_parameter(effect, prop, value)
+            self._commit_change()
+            self.random_effect_editing = None
+            self.random_effect_input_select_all = False
+            self.status = self._random_effect_parameter_status(prop, normalized)
+            return
+        if event.key == pygame.K_ESCAPE:
+            self.random_effect_editing = None
+            self.random_effect_input_select_all = False
+            self.status = f"{self._random_effect_parameter_label(prop)} edit cancelled"
+            return
+        if event.key == pygame.K_BACKSPACE:
+            if self.random_effect_input_select_all:
+                self.random_effect_input = ""
+                self.random_effect_input_select_all = False
+            else:
+                self.random_effect_input = self.random_effect_input[:-1]
+            return
+        character = getattr(event, "unicode", "")
+        if character.isdigit() or character in ".,":
+            if self.random_effect_input_select_all:
+                self.random_effect_input = ""
+                self.random_effect_input_select_all = False
+            normalized = "." if character == "," else character
+            if normalized == "." and "." in self.random_effect_input:
+                return
+            if len(self.random_effect_input) < 12:
+                self.random_effect_input += normalized
 
     def _handle_property_input(self, event: pygame.event.Event) -> None:
         prop = self.property_editing
@@ -4103,25 +4319,58 @@ class Editor:
         state = "ON" if enabled else "OFF"
         self.screen.blit(self.font.render(state, True, state_color), (x + 72, y - 3))
         self._button(pygame.Rect(x + 132, y - 6, 68, 30), "random_led_toggle", "Toggle", enabled)
-        self._button(pygame.Rect(x + 207, y - 6, 68, 30), "random_led_keyframe", "+ Key", False)
+        self._button(pygame.Rect(x + 207, y - 6, 68, 30), "random_led_keyframe", "State key", False)
         y += 42
 
-        def parameter_row(label: str, value: str, minus: str, plus: str) -> None:
+        def parameter_row(prop: str, label: str, value: float | int) -> None:
             nonlocal y
             row = pygame.Rect(x, y, 275, 34)
-            pygame.draw.rect(self.screen, (39, 43, 53), row, border_radius=4)
-            pygame.draw.rect(self.screen, (67, 72, 86), row, 1, border_radius=4)
+            hovered = row.collidepoint(pygame.mouse.get_pos())
+            editing = self.random_effect_editing == prop
+            pygame.draw.rect(
+                self.screen, (49, 57, 72) if editing or hovered else (39, 43, 53),
+                row, border_radius=4,
+            )
+            pygame.draw.rect(
+                self.screen, ACCENT if editing or hovered else (67, 72, 86),
+                row, 1, border_radius=4,
+            )
             self.screen.blit(self.small.render(label, True, (151, 158, 176)), (row.x + 8, row.y + 9))
-            rendered = self.small.render(value, True, (235, 238, 245))
-            self.screen.blit(rendered, rendered.get_rect(center=(row.centerx + 35, row.centery)))
-            self._button(pygame.Rect(row.right - 62, row.y + 3, 27, 28), minus, "-", False)
-            self._button(pygame.Rect(row.right - 30, row.y + 3, 27, 28), plus, "+", False)
+            if editing:
+                value_text = self.random_effect_input
+                if (pygame.time.get_ticks() // 500) % 2 == 0:
+                    value_text += "|"
+            elif prop == "life_ms":
+                value_text = f"{int(value)} ms"
+            elif prop == "born_speed":
+                value_text = f"{float(value):g} / sec"
+            elif prop == "opacity":
+                value_text = f"{float(value) * 100:.1f}%"
+            else:
+                value_text = str(int(value))
+            has_key = prop == "opacity" and any(
+                frame.time_ms == self.current_ms
+                for frame in effect.keyframes.get("opacity", [])
+            )
+            value_right = row.right - (45 if prop == "opacity" else 9)
+            rendered = self.small.render(value_text, True, (235, 238, 245))
+            self.screen.blit(rendered, (value_right - rendered.get_width(), row.y + 9))
+            field = pygame.Rect(row) if prop != "opacity" else pygame.Rect(
+                row.x, row.y, row.width - 39, row.height,
+            )
+            self.buttons.append((field, f"random_led_field:{prop}", f"{label} — drag or click to type"))
+            if prop == "opacity":
+                self._button(
+                    pygame.Rect(row.right - 35, row.y + 3, 31, 28),
+                    "random_led_opacity_keyframe", "+K", has_key,
+                )
             y += 42
 
-        parameter_row("Random seed", str(effect.seed), "random_led_seed:-1", "random_led_seed:1")
-        parameter_row("Life", f"{effect.life_ms} ms", "random_led_life:-50", "random_led_life:50")
-        parameter_row("Born speed", f"{effect.born_speed:g} / sec", "random_led_birth:-1", "random_led_birth:1")
-        parameter_row("Max active", str(effect.particle_count), "random_led_count:-1", "random_led_count:1")
+        parameter_row("seed", "Random seed", effect.seed)
+        parameter_row("life_ms", "Life", effect.life_ms)
+        parameter_row("born_speed", "Born speed", effect.born_speed)
+        parameter_row("particle_count", "Max active", effect.particle_count)
+        parameter_row("opacity", "Opacity", float(effect.value_at("opacity", self.current_ms)))
 
         y += 5
         self.screen.blit(self.small.render("Flash color", True, (172, 178, 193)), (x, y)); y += 25
@@ -4133,12 +4382,18 @@ class Editor:
             self.buttons.append((rect, f"color:{index}", "Random LED color"))
 
         y += 48
-        key_count = len(effect.keyframes.get("enabled", []))
+        enabled_keys = len(effect.keyframes.get("enabled", []))
+        opacity_keys = len(effect.keyframes.get("opacity", []))
         self.screen.blit(
-            self.small.render(f"Enabled keyframes: {key_count}  •  Seeded preview/export", True, (145, 153, 171)),
+            self.small.render(f"Keyframes: enabled {enabled_keys} · opacity {opacity_keys}", True, (145, 153, 171)),
             (x, y),
         )
-        y += 34
+        y += 20
+        self.screen.blit(
+            self.small.render("Drag fields horizontally · click to type", True, (125, 135, 154)),
+            (x, y),
+        )
+        y += 29
         self._button(pygame.Rect(x, y, 275, 30), "random_led_delete", "Remove Random LED effect", False)
 
         pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))

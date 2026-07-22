@@ -340,8 +340,22 @@ def test_random_led_enabled_can_be_keyframed_off():
     assert render_leds(project, [(0.2, 0.2), (0.8, 0.8)], 200) == [(0, 0, 0), (0, 0, 0)]
 
 
+def test_random_led_opacity_is_interpolated_and_applied_to_rendering():
+    effect = RandomLedEffect(seed=42, color=(200, 80, 20), opacity=1.0)
+    effect.add_keyframe("opacity", 0, 1.0)
+    effect.add_keyframe("opacity", 100, 0.0)
+    project = Project(layers=[Layer("fx", effects=[effect])])
+
+    assert effect.value_at("opacity", 50) == 0.5
+    assert (80, 32, 8) in render_leds(project, [(0.2, 0.2), (0.8, 0.8)], 50)
+    assert render_leds(project, [(0.2, 0.2), (0.8, 0.8)], 100) == [(0, 0, 0), (0, 0, 0)]
+
+
 def test_project_round_trip_preserves_random_led_settings(tmp_path):
-    effect = RandomLedEffect(seed=99, life_ms=400, born_speed=12.5, particle_count=17, color=(4, 5, 6))
+    effect = RandomLedEffect(
+        seed=99, life_ms=400, born_speed=12.5, particle_count=17,
+        color=(4, 5, 6), opacity=0.65,
+    )
     effect.add_keyframe("enabled", 700, False)
     project = Project(layers=[Layer("fx", effects=[effect])])
     path = tmp_path / "random-led.cnclight"
@@ -353,4 +367,5 @@ def test_project_round_trip_preserves_random_led_settings(tmp_path):
     assert (loaded_effect.seed, loaded_effect.life_ms, loaded_effect.born_speed) == (99, 400, 12.5)
     assert loaded_effect.particle_count == 17
     assert loaded_effect.color == (4, 5, 6)
+    assert loaded_effect.opacity == 0.65
     assert loaded_effect.value_at("enabled", 800) is False
