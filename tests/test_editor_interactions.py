@@ -250,6 +250,22 @@ def test_timeline_on_off_button_toggles_layer_without_selecting_another_row():
     assert "OFF" in editor.status
 
 
+def test_canvas_mode_is_an_undoable_export_setting():
+    editor = make_editor()
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+
+    assert "toggle_overlay" in actions
+    assert editor.project.overlay is False
+
+    editor._action("toggle_overlay")
+    assert editor.project.overlay is True
+    assert "CANVAS" in editor.status
+
+    editor._undo()
+    assert editor.project.overlay is False
+
+
 def test_ctrl_d_duplicates_active_layer_with_unique_ids_and_undo():
     editor = make_editor()
     editor._create_shape("rectangle", (0.4, 0.4))

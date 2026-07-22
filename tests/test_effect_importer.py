@@ -64,7 +64,7 @@ def test_parses_v4_rgb_metadata_and_loop_outro_playback():
     white = [255, 255, 255] * EFFECT_LEDS
     data = ",".join(map(str, red + blue + white))
     source = v4_header(
-        '{ 7, "pulse", fx_pulse, 3, 50, 2, 2 },',
+        '{ 7, "pulse", fx_pulse, 3, 50, 2, 2, 1 },',
         f"const uint8_t fx_pulse[] PROGMEM = {{ {data} }};",
     )
 
@@ -72,6 +72,7 @@ def test_parses_v4_rgb_metadata_and_loop_outro_playback():
 
     assert (effect.effect_id, effect.name, effect.symbol) == (7, "pulse", "fx_pulse")
     assert effect.flash_bytes == 3 * 204
+    assert effect.overlay is True
     assert effect.duration_ms == 250
     assert effect.colors_at(0)[0] == (255, 0, 0)
     assert effect.colors_at(50)[0] == (0, 0, 255)
@@ -117,3 +118,15 @@ def test_v4_import_uses_explicit_id_not_table_position():
 
     assert [effect.effect_id for effect in effects] == [9, 3]
     assert [effect.name for effect in effects] == ["later", "earlier"]
+    assert [effect.overlay for effect in effects] == [False, False]
+
+
+def test_v4_import_rejects_invalid_overlay_flag():
+    values = ",".join("0" for _ in range(EFFECT_LEDS * 3))
+    source = v4_header(
+        '{ 4, "invalid", fx_invalid, 1, 50, 1, 1, 2 },',
+        f"const uint8_t fx_invalid[] PROGMEM = {{ {values} }};",
+    )
+
+    with pytest.raises(ValueError, match="overlay must be 0"):
+        parse_effect_data(source)

@@ -43,6 +43,7 @@ class ImportedEffect:
     symbol: str = ""
     loops: int = 1
     loop_frames: int = 0
+    overlay: bool = False
 
     @property
     def normalized_loop_frames(self) -> int:
@@ -116,17 +117,22 @@ def _parse_v4_effects(source: str) -> list[ImportedEffect]:
 
     row_pattern = re.compile(
         r"\{\s*(\d+)\s*,\s*\"((?:\\.|[^\"\\])*)\"\s*,\s*"
-        r"(fx_[A-Za-z_]\w*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}"
+        r"(fx_[A-Za-z_]\w*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
+        r"\s*(?:,\s*(\d+))?\s*\}"
     )
     effects: list[ImportedEffect] = []
     seen_ids: set[int] = set()
     for match in row_pattern.finditer(table_match.group(1)):
-        raw_id, raw_name, symbol, raw_frames, raw_frame_ms, raw_loops, raw_loop_frames = match.groups()
+        (
+            raw_id, raw_name, symbol, raw_frames, raw_frame_ms, raw_loops,
+            raw_loop_frames, raw_overlay,
+        ) = match.groups()
         effect_id = int(raw_id)
         frame_count = int(raw_frames)
         frame_ms = int(raw_frame_ms)
         loops = int(raw_loops) or 1
         loop_frames = int(raw_loop_frames)
+        overlay = int(raw_overlay or 0)
         name = json.loads(f'"{raw_name}"')
 
         if effect_id in seen_ids:
@@ -142,6 +148,8 @@ def _parse_v4_effects(source: str) -> list[ImportedEffect]:
             raise ValueError(f"{name}: loops must be between 1 and 255")
         if not 0 <= loop_frames <= frame_count:
             raise ValueError(f"{name}: loopFrames must be between 0 and frames ({frame_count})")
+        if overlay not in (0, 1):
+            raise ValueError(f"{name}: overlay must be 0 (FULL) or 1 (CANVAS)")
         if symbol not in arrays:
             raise ValueError(f"{name}: referenced data array {symbol} was not found")
 
@@ -153,7 +161,9 @@ def _parse_v4_effects(source: str) -> list[ImportedEffect]:
         for frame_offset in range(0, expected, BYTES_PER_FRAME):
             chunk = values[frame_offset:frame_offset + BYTES_PER_FRAME]
             frames.append([tuple(chunk[index:index + 3]) for index in range(0, BYTES_PER_FRAME, 3)])
-        effects.append(ImportedEffect(name, frames, frame_ms, effect_id, symbol, loops, loop_frames))
+        effects.append(ImportedEffect(
+            name, frames, frame_ms, effect_id, symbol, loops, loop_frames, bool(overlay),
+        ))
 
     if not effects:
         raise ValueError("No valid effect rows found in bakedEffects[]")

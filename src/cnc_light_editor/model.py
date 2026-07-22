@@ -126,6 +126,7 @@ class Project:
     frame_ms: int | None = None
     loops: int = 1
     loop_frames: int = 0
+    overlay: bool = False
 
     def __post_init__(self) -> None:
         # ``fps`` is kept in the file format so projects saved by early builds

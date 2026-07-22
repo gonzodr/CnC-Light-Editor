@@ -83,7 +83,7 @@ def test_atomic_project_round_trip_preserves_color_keyframe_tuple(tmp_path):
 def test_v4_metadata_and_memory_estimates_round_trip(tmp_path):
     project = Project(
         "loop with outro", duration_ms=5000, effect_id=8, frame_ms=50,
-        loops=5, loop_frames=20,
+        loops=5, loop_frames=20, overlay=True,
     )
     path = tmp_path / "metadata.cnclight"
 
@@ -92,6 +92,7 @@ def test_v4_metadata_and_memory_estimates_round_trip(tmp_path):
 
     assert loaded.effect_id == 8
     assert loaded.frame_ms == 50
+    assert loaded.overlay is True
     assert loaded.actual_fps == 20
     assert loaded.stored_frame_count == 100
     assert loaded.flash_bytes == 20400

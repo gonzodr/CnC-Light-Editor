@@ -26,7 +26,7 @@
 
 5. **Firmware-hű V4 round-trip export**
    - [x] 68 × RGB baked frame import/export, fix `frameMs` időzítéssel.
-   - [x] Explicit ID, `loops`, `loopFrames` és egyszer lefutó outro támogatása.
+   - [x] Explicit ID, `loops`, `loopFrames`, egyszer lefutó outro és FULL/CANVAS overlay flag támogatása.
    - [x] Duplikált ID és `frames × 204` adathossz validációja.
    - Több projekt-effekt egyetlen rendezhető `effect_data.h` könyvtárba fűzése.
 

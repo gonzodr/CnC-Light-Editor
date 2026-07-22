@@ -26,7 +26,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - A `NULL` nevű LED-slotok előnézetben és exportban kikapcsolva maradnak.
 - Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál. A `NULL` slot RGB-je fekete.
 - JSON projektmentés és visszatöltés.
-- A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops` és `loopFrames` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
+- A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops`, `loopFrames` és `overlay` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
 
 ## Telepítés Windows alatt
 
@@ -67,7 +67,7 @@ cnc-light-editor
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
 - Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében. A stroke mező vízszintesen húzható, kattintás után pedig kézzel is beírható `0,1–5,0` között.
 - Gradient: Fill módban nyisd meg a `Gradient fill…` panelt. Kattints a colorbarra új stophoz, húzd a stopokat, majd adj színt a kijelölt stopnak. A Solid/Linear/Radial mód és a Linear angle ugyanitt állítható.
-- Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A panel élő flash- és lejátszási időbecslést mutat.
+- Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A `FULL/CANVAS` exportkapcsoló adja az `overlay` flaget; a panel élő flash- és lejátszási időbecslést mutat.
 - Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. A Toggle az aktuális időnél keyframe-et hoz létre, a `+ Key` megtartja az aktuális enabled állapotot.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; aktív layer duplikálása: `Ctrl+D`.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.
@@ -79,7 +79,7 @@ A toolbar `Export` gombja az `exports/effect_data.h` fájlt generálja. A projek
 
 A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a `bakedEffects[]` leírókat, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
-Az editor minden opacityt, easinget, gradientet és generatív effektet előre belesüt a frame-ek RGB-értékeibe. A V4 motor kizárólag ezeket a kész képkockákat játssza le. A loop első `loopFrames` képkockája `loops` alkalommal ismétlődik, a maradék outro egyszer fut le; az ID explicit és nem függ a táblasorrendtől.
+Az editor minden opacityt, easinget, gradientet és generatív effektet előre belesüt a frame-ek RGB-értékeibe. A V4 motor kizárólag ezeket a kész képkockákat játssza le. A loop első `loopFrames` képkockája `loops` alkalommal ismétlődik, a maradék outro egyszer fut le; az ID explicit és nem függ a táblasorrendtől. `FULL` módban a fekete cella leoltja a LED-et; `CANVAS/OVERLAY` módban a `(0,0,0)` átlátszó, ezért a normál játékfény látható marad alatta.
 
 ## LED-kalibráció
 

@@ -9,18 +9,19 @@ def test_export_pads_playfield_map_to_68_leds_and_writes_v4_metadata(tmp_path):
     shape = Shape("rectangle", "all", width=1.0, height=1.0, color=(1, 2, 3))
     project = Project(
         "Launch flash", duration_ms=100, fps=10, effect_id=6, frame_ms=50,
-        loops=3, loop_frames=1, layers=[Layer("one", shapes=[shape])],
+        loops=3, loop_frames=1, overlay=True, layers=[Layer("one", shapes=[shape])],
     )
     path = export_arduino_header(project, [(0.5, 0.5)] * 59, tmp_path / "effect_data.h")
     text = path.read_text(encoding="utf-8")
     effect = parse_effect_data(text)[0]
 
     assert "const uint8_t fx_launch_flash[] PROGMEM" in text
-    assert '{ 6, "Launch flash", fx_launch_flash, 2, 50, 3, 1 }' in text
+    assert '{ 6, "Launch flash", fx_launch_flash, 2, 50, 3, 1, 1 }' in text
     assert effect.effect_id == 6
     assert effect.frame_ms == 50
     assert effect.loops == 3
     assert effect.loop_frames == 1
+    assert effect.overlay is True
     assert len(effect.frames) == 2
     assert len(effect.frames[0]) == 68
     assert effect.frames[0][0] == (1, 2, 3)
@@ -56,3 +57,14 @@ def test_export_rejects_loop_boundary_past_stored_frames(tmp_path):
 
     with pytest.raises(ValueError, match="loopFrames"):
         export_arduino_header(project, [], tmp_path / "effect_data.h")
+
+
+def test_export_defaults_to_full_canvas_mode(tmp_path):
+    project = Project("full effect", duration_ms=50, frame_ms=50)
+
+    path = export_arduino_header(project, [], tmp_path / "effect_data.h")
+    text = path.read_text(encoding="utf-8")
+    effect = parse_effect_data(text)[0]
+
+    assert "FULL (black stays black)" in text
+    assert effect.overlay is False

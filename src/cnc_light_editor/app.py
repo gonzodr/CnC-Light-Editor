@@ -469,7 +469,8 @@ class Editor:
             or action in {
                 "layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
-                "set_loop_end", "clear_loop_end", "gradient_add_stop", "gradient_delete_stop",
+                "set_loop_end", "clear_loop_end", "toggle_overlay",
+                "gradient_add_stop", "gradient_delete_stop",
                 "random_led_toggle", "random_led_keyframe", "random_led_seed:-1", "random_led_seed:1",
                 "random_led_life:-50", "random_led_life:50", "random_led_birth:-1", "random_led_birth:1",
                 "random_led_count:-1", "random_led_count:1", "random_led_delete",
@@ -660,6 +661,13 @@ class Editor:
             self.project.fps = round(self.project.actual_fps)
             self.current_ms = self._snap_time_to_frame(self.current_ms)
             self.status = f"frameMs {self.project.frame_ms} — actual {self.project.actual_fps:.2f} FPS"
+        elif action == "toggle_overlay":
+            self.project.overlay = not self.project.overlay
+            self.status = (
+                "Export mode: CANVAS/OVERLAY — black cells are transparent"
+                if self.project.overlay else
+                "Export mode: FULL — black cells overwrite the playfield"
+            )
         elif action.startswith("loops:"):
             delta = int(action.split(":", 1)[1])
             self.project.loops = max(1, min(255, self.project.loops + delta))
@@ -712,7 +720,8 @@ class Editor:
             else:
                 try:
                     export_arduino_header(self.project, self.led_map.export_slots(), EXPORT_FILE)
-                    self.status = f"V4 export: {self.project.stored_frame_count} frames / {self.project.flash_bytes} bytes"
+                    mode = "CANVAS" if self.project.overlay else "FULL"
+                    self.status = f"V4 {mode}: {self.project.stored_frame_count} frames / {self.project.flash_bytes} bytes"
                 except (OSError, ValueError) as error:
                     self.status = f"Export failed: {error}"
         elif action == "edit_led_id":
@@ -2152,7 +2161,8 @@ class Editor:
             label = self.small.render(
                 (
                     f"ID {imported.effect_id}  /  {imported.name}  /  {len(imported.frames)} stored  /  "
-                    f"{imported.frame_ms} ms  /  ×{imported.loops}"
+                    f"{imported.frame_ms} ms  /  ×{imported.loops}  /  "
+                    f"{'CANVAS' if imported.overlay else 'FULL'}"
                 ),
                 True, (226, 230, 239),
             )
@@ -2304,7 +2314,8 @@ class Editor:
         if imported:
             summary = f"ID {imported.effect_id}  •  {imported.frame_ms} ms  •  {imported.actual_fps:.2f} FPS  •  ×{imported.loops}"
             self.screen.blit(self.small.render(summary, True, (118, 184, 255)), (x, y)); y += 22
-            loop_text = f"Loop {imported.normalized_loop_frames}/{len(imported.frames)}  •  {imported.flash_bytes} B flash"
+            mode = "CANVAS" if imported.overlay else "FULL"
+            loop_text = f"Loop {imported.normalized_loop_frames}/{len(imported.frames)}  •  {imported.flash_bytes} B  •  {mode}"
             self.screen.blit(self.small.render(loop_text, True, (154, 162, 180)), (x, y)); y += 31
         else:
             summary = f"ID {self.project.effect_id}  •  {self.project.frame_ms} ms  •  {self.project.actual_fps:.2f} FPS"
@@ -2320,10 +2331,15 @@ class Editor:
             y += 32
             loop_frames = self.project.normalized_loop_frames
             stats = (
-                f"×{self.project.loops}  •  loop {loop_frames}/{self.project.stored_frame_count}  •  "
-                f"{self.project.flash_bytes} B  •  {self.project.firmware_playback_ms / 1000:.2f}s"
+                f"×{self.project.loops} • {loop_frames}/{self.project.stored_frame_count} • "
+                f"{self.project.flash_bytes} B • {self.project.firmware_playback_ms / 1000:.2f}s"
             )
-            self.screen.blit(self.small.render(stats, True, (154, 162, 180)), (x, y)); y += 24
+            self.screen.blit(self.small.render(stats, True, (154, 162, 180)), (x, y))
+            self._button(
+                pygame.Rect(x + 203, y - 4, 72, 25), "toggle_overlay",
+                "CANVAS" if self.project.overlay else "FULL", self.project.overlay,
+            )
+            y += 24
 
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 12
