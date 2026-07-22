@@ -250,6 +250,101 @@ def test_timeline_on_off_button_toggles_layer_without_selecting_another_row():
     assert "OFF" in editor.status
 
 
+def test_timeline_layer_expands_into_individual_property_rows():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.add_keyframe("x", 1000, 0.7)
+    editor.selected.add_keyframe("opacity", 1500, 0.3)
+
+    editor._action("toggle_timeline_layer:0")
+    rows = editor._timeline_rows()
+
+    assert [(row.kind, row.prop) for row in rows] == [
+        ("layer", None), ("property", "x"), ("property", "opacity"),
+    ]
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert "toggle_timeline_layer:0" in actions
+    assert f"select_timeline_target:{editor.selected.id}" in actions
+
+
+def test_expanded_property_row_selects_only_its_own_keyframe():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor.selected.add_keyframe("x", 1000, 0.7)
+    editor.selected.add_keyframe("opacity", 1000, 0.3)
+    editor._action("toggle_timeline_layer:0")
+    _, _, timeline = editor.layout()
+    x_row_y = next(
+        row_y for row, row_y in editor._timeline_visible_rows(timeline)
+        if row.prop == "x"
+    )
+    key_x = round(editor._time_to_timeline_x(1000, timeline))
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": (key_x, x_row_y)},
+    ))
+
+    assert editor.selected_keyframes == {(editor.selected.id, "x", 1000)}
+
+
+def test_marquee_and_drag_offset_keyframes_across_property_rows_and_targets():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    first = editor.selected
+    first.add_keyframe("x", 1000, 0.7)
+    editor._create_shape("rectangle", (0.4, 0.4))
+    second = editor.selected
+    second.add_keyframe("opacity", 2000, 0.2)
+    editor._action("toggle_timeline_layer:0")
+    _, _, timeline = editor.layout()
+    visible = editor._timeline_visible_rows(timeline)
+    x_row_y = next(row_y for row, row_y in visible if row.target_id == first.id)
+    opacity_row_y = next(row_y for row, row_y in visible if row.target_id == second.id)
+    first_x = round(editor._time_to_timeline_x(1000, timeline))
+    second_x = round(editor._time_to_timeline_x(2000, timeline))
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN,
+        {"button": 3, "pos": (first_x - 10, x_row_y - 10)},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {
+            "pos": (second_x + 10, opacity_row_y + 10),
+            "rel": (0, 0), "buttons": (0, 0, 1),
+        },
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP,
+        {"button": 3, "pos": (second_x + 10, opacity_row_y + 10)},
+    ))
+    assert editor.selected_keyframes == {
+        (first.id, "x", 1000), (second.id, "opacity", 2000),
+    }
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": (first_x, x_row_y)},
+    ))
+    target_x = round(editor._time_to_timeline_x(1500, timeline))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {"pos": (target_x, x_row_y), "rel": (0, 0), "buttons": (1, 0, 0)},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"button": 1, "pos": (target_x, x_row_y)},
+    ))
+
+    assert [frame.time_ms for frame in first.keyframes["x"]] == [1500]
+    assert [frame.time_ms for frame in second.keyframes["opacity"]] == [2500]
+
+    editor._undo()
+    restored_first = editor._find_keyframe_target(first.id)
+    restored_second = editor._find_keyframe_target(second.id)
+    assert [frame.time_ms for frame in restored_first.keyframes["x"]] == [1000]
+    assert [frame.time_ms for frame in restored_second.keyframes["opacity"]] == [2000]
+
+
 def test_canvas_mode_is_an_undoable_export_setting():
     editor = make_editor()
     editor.draw()
@@ -440,6 +535,26 @@ def test_color_palette_applies_to_every_selected_keyframe_time():
     assert [frame.value for frame in color_frames] == [(30, 180, 255), (30, 180, 255)]
     assert (editor.selected.id, "color", 1000) in editor.selected_keyframes
     assert (editor.selected.id, "color", 2000) in editor.selected_keyframes
+
+
+def test_color_palette_applies_across_selected_shape_targets():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    first = editor.selected
+    first.add_keyframe("x", 1000, 0.4)
+    editor._create_shape("rectangle", (0.4, 0.4))
+    second = editor.selected
+    second.add_keyframe("opacity", 2000, 0.4)
+    editor.selected_keyframes = {
+        (first.id, "x", 1000), (second.id, "opacity", 2000),
+    }
+
+    editor._action("color:4")
+
+    assert first.keyframes["color"][0].value == (30, 180, 255)
+    assert first.keyframes["color"][0].time_ms == 1000
+    assert second.keyframes["color"][0].value == (30, 180, 255)
+    assert second.keyframes["color"][0].time_ms == 2000
 
 
 def test_project_save_load_round_trip_and_dirty_state(tmp_path):

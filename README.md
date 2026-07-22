@@ -58,9 +58,9 @@ cnc-light-editor
 - Layer-sorrend: húzd a layer sorát fel vagy le. A timeline layernevére kattintva aktiválhatod; az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig törli az aktív layert.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.
-- A timeline layer-sorai előtt külön `ON/OFF` kapcsoló vezérli a layer láthatóságát. Ha a sorok nem férnek ki, a layernév-oszlop fölött görgetve függőlegesen lapozhatók; a jobb oldali időterület fölötti görgő továbbra is timeline-zoom.
-- Több keyframe kijelölése: jobb egérgombbal húzz kijelölőkeretet a timeline-on; `Ctrl` mellett a találatok hozzáadódnak a meglévő kijelöléshez. `Ctrl` + jobb kattintással egyenként is hozzáadhatsz vagy kivehetsz keyframe-eket.
-- Keyframe-offset: fogd meg bármelyik kijelölt gyémántot; a teljes kijelölés együtt mozog, az egymás közötti időeltolás megtartásával.
+- A timeline layer-sorai előtt külön `ON/OFF` kapcsoló vezérli a layer láthatóságát. A `>` gomb lenyitja a layert az animált property-k külön dope sheet sávjaira. Ha a sorok nem férnek ki, a layernév-oszlop fölött görgetve függőlegesen lapozhatók; a jobb oldali időterület fölötti görgő továbbra is timeline-zoom.
+- Több keyframe kijelölése: jobb egérgombbal húzz kijelölőkeretet a timeline-on, akár több property-sávon és shape-en keresztül; `Ctrl` mellett a találatok hozzáadódnak a meglévő kijelöléshez. `Ctrl` + jobb kattintással egyenként is hozzáadhatsz vagy kivehetsz keyframe-eket.
+- Keyframe-offset: fogd meg bármelyik kijelölt gyémántot; a teljes kijelölés shape-ek és property-k között is együtt mozog, az egymás közötti időeltolás megtartásával.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
 - Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél az effekt saját `frameMs` értékét használja.
