@@ -7,4 +7,7 @@ dist/
 build/
 exports/*.h
 projects/*.cnclight
+projects/.autosave/
+projects/.editor_settings.json
+/work/
 !projects/.gitkeep
