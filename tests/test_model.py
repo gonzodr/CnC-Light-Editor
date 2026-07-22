@@ -14,6 +14,26 @@ def test_keyframes_interpolate_scale_and_color():
     assert shape.value_at("color", 500) == (100, 50, 25)
 
 
+def test_first_keyframe_holds_back_to_timeline_start_for_every_target_type():
+    shape = Shape(
+        "ellipse", "future state", x=0.1, color=(1, 2, 3), visible=True,
+    )
+    shape.add_keyframe("x", 800, 0.75)
+    shape.add_keyframe("color", 800, (120, 80, 40))
+    shape.add_keyframe("visible", 800, False)
+    effect = RandomLedEffect(enabled=False)
+    effect.add_keyframe("enabled", 600, True)
+    canvas = Layer("Canvas", is_canvas=True, canvas_enabled=False)
+    canvas.add_keyframe("canvas_enabled", 500, True)
+
+    assert shape.value_at("x", 0) == 0.75
+    assert shape.value_at("color", 400) == (120, 80, 40)
+    assert shape.value_at("visible", 799) is False
+    assert shape.value_at("width", 0) == shape.width
+    assert effect.value_at("enabled", 0) is True
+    assert canvas.value_at("canvas_enabled", 0) is True
+
+
 def test_rotation_turns_preserve_full_revolutions_during_interpolation():
     shape = Shape("rectangle", "spinner")
     shape.add_keyframe("rotation", 0, 0.0)
@@ -45,6 +65,7 @@ def test_visibility_is_stepped():
     shape = Shape("rectangle", "switch")
     shape.add_keyframe("visible", 100, False)
     shape.add_keyframe("visible", 200, True)
+    assert shape.value_at("visible", 0) is False
     assert shape.value_at("visible", 150) is False
 
 
@@ -311,6 +332,7 @@ def test_random_led_effect_ignores_layer_shape_mask_and_is_deterministic():
 
 def test_random_led_enabled_can_be_keyframed_off():
     effect = RandomLedEffect(seed=1, color=(255, 255, 255))
+    effect.add_keyframe("enabled", 0, True)
     effect.add_keyframe("enabled", 100, False)
     project = Project(layers=[Layer("fx", effects=[effect])])
 

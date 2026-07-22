@@ -65,7 +65,7 @@ cnc-light-editor
 - Keyframe-offset: fogd meg bármelyik kijelölt gyémántot; a teljes kijelölés shape-ek és property-k között is együtt mozog, az egymás közötti időeltolás megtartásával.
 - Keyframe másolás: `Ctrl+C` eltárolja az összes kijelölt keyframe-et, a `Ctrl+V` pedig úgy illeszti be őket, hogy a legkorábbi másolat az aktuális playheadhez kerüljön. A shape/property cél, az egymás közötti időeltolás, az easing és a Custom Bezier adatok is megmaradnak; szükség esetén a timeline automatikusan meghosszabbodik legfeljebb 15 másodpercig.
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
-- Ha egy property legelső keyframe-jét törlöd, az első megmaradó keyframe értéke lesz az alakzat új alapértéke, ezért a keyframe előtti szakasz nem ugrik vissza egy oda nem illő default állapotra.
+- Ha egy property első keyframe-je nem a timeline elején áll, az előtte lévő teljes üres szakasz automatikusan ennek az első keyframe-nek az értékét tartja. Ez minden animálható shape-, Random LED- és Canvas-tulajdonságra érvényes. Ha a legelső keyframe-et törlöd, az első megmaradó keyframe tölti ki visszafelé a timeline elejéig tartó szakaszt.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
 - Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél az effekt saját `frameMs` értékét használja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
@@ -75,6 +75,7 @@ cnc-light-editor
 - Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A `FULL/CANVAS` exportkapcsoló adja az `overlay` flaget; a panel élő flash- és lejátszási időbecslést mutat. A Layers fejléc `C+` gombja egyetlen, speciális Canvas réteget ad a projekthez. Ennek timeline-on keyframe-elhető ON/OFF állapota dönti el, hogy az adott időpontban a formák által nem festett LED-ek átlátszóak maradnak-e, vagy fekete blackout értéket kapnak.
 - Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. A Toggle az aktuális időnél keyframe-et hoz létre, a `+ Key` megtartja az aktuális enabled állapotot.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; aktív layer duplikálása: `Ctrl+D`.
+- Hotkey súgó: a felső `?` gomb vagy `F1`; bezárás: `Esc`, `F1` vagy az ablak `×` gombja.
 - Minden tulajdonság keyframe-je: `K`; láthatóság: `V`; lejátszás: `Space`.
 - Snap ki/be: `G`. Bekapcsolva az alakzat pozícióját és méretét 0,01-es normalizált rácsra, a forgatást 15°-ra, a keyframe idejét pedig FPS-képkockahatárra igazítja; kikapcsolva minden folyamatosan mozgatható.
 - Projektmentés/betöltés: `Ctrl+S`, `Ctrl+O`; Save As: `Ctrl+Shift+S`. Az első mentés fájlnevet kér, a további mentések ugyanazt a `.cnclight` fájlt frissítik.

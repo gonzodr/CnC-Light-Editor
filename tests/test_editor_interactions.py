@@ -87,6 +87,32 @@ def test_imported_overlay_sentinel_is_transparent_in_led_preview():
     assert set(editor._preview_led_colors()) == {(0, 0, 0)}
 
 
+def test_help_button_and_f1_open_a_modal_that_escape_closes():
+    editor = make_editor()
+    editor.draw()
+
+    assert "help" in {action for _rect, action, _label in editor.buttons}
+
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_F1, "mod": 0, "unicode": ""},
+    ))
+    assert editor.help_open is True
+
+    editor.draw()
+    assert "help_close" in {action for _rect, action, _label in editor.buttons}
+
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_F1, "mod": 0, "unicode": ""},
+    ))
+    assert editor.help_open is False
+
+    editor._action("help")
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_ESCAPE, "mod": 0, "unicode": ""},
+    ))
+    assert editor.help_open is False
+
+
 def test_drag_created_shape_can_be_undone_and_redone():
     editor = make_editor()
     editor._create_shape("rectangle", (0.25, 0.4))
@@ -1197,7 +1223,7 @@ def test_random_led_editor_creates_effect_and_keyframes_enabled_state():
 
     assert editor.random_led_editor_open is True
     assert effect is not None
-    assert effect.value_at("enabled", 499) is True
+    assert effect.value_at("enabled", 499) is False
     assert effect.value_at("enabled", 500) is False
     assert editor._keyframe_keys_at(500) == {(effect.id, "enabled", 500)}
 

@@ -33,6 +33,52 @@ BANK_COLORS = [
     (74, 151, 255), (118, 92, 246), (224, 82, 151), (255, 126, 64),
     (244, 190, 55), (74, 198, 126), (48, 188, 202), (150, 104, 218),
 ]
+HELP_COLUMNS = (
+    (
+        ("PROJECT", (
+            ("Ctrl + S", "Save project"),
+            ("Ctrl + Shift + S", "Save project as"),
+            ("Ctrl + O", "Load project"),
+            ("Ctrl + I", "Import effect_data.h"),
+            ("Ctrl + Z", "Undo"),
+            ("Ctrl + Shift + Z", "Redo"),
+        )),
+        ("TIMELINE / KEYFRAMES", (
+            ("Space", "Play / pause"),
+            ("K", "Add keyframe at playhead"),
+            ("V", "Toggle shape or Canvas state"),
+            ("Ctrl + C / V", "Copy / paste selected keyframes"),
+            ("Delete", "Delete selected keyframes or shape"),
+            ("G", "Toggle snapping"),
+            ("Mouse wheel", "Zoom timeline"),
+            ("Shift + wheel", "Scroll timeline horizontally"),
+            ("Right-drag", "Marquee-select keyframes"),
+        )),
+    ),
+    (
+        ("LAYERS / CANVAS", (
+            ("Ctrl + D", "Duplicate active layer"),
+            ("C+ button", "Add the keyframeable Canvas layer"),
+            ("Layer ON/OFF", "Toggle layer; Canvas creates a keyframe"),
+        )),
+        ("VIEWPORT / SHAPES", (
+            ("Arrow keys", "Move selected shape"),
+            ("Shift + arrows", "Move selected shape precisely"),
+            ("[  /  ]", "Rotate selected shape by 5 degrees"),
+            ("F", "Fit / reset viewport"),
+            ("Mouse wheel", "Zoom playfield"),
+            ("Middle-drag", "Pan playfield"),
+            ("Space + drag", "Pan playfield"),
+        )),
+        ("LED MAP", (
+            ("Tab / Right", "Next LED position"),
+            ("Left", "Previous LED position"),
+            ("+  /  -", "Step firmware LED ID"),
+            ("Ctrl + S", "Save LED map while LED map is open"),
+            ("Esc", "Cancel LED movement"),
+        )),
+    ),
+)
 
 TOP_BAR = 54
 TOOLBAR_WIDTH = 68
@@ -108,6 +154,7 @@ class Editor:
         self.active_import_index: int | None = None
         self.effect_data_path: Path | None = None
         self.export_bank_open = False
+        self.help_open = False
         self.export_bank_effects: list[ImportedEffect] = []
         self.export_bank_path: Path | None = None
         self.export_bank_selected = -1
@@ -229,6 +276,20 @@ class Editor:
     def handle_event(self, event: pygame.event.Event) -> None:
         canvas, panel, timeline = self.layout()
         viewport = pygame.Rect(TOOLBAR_WIDTH, TOP_BAR, panel.x - TOOLBAR_WIDTH, timeline.y - TOP_BAR)
+
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+            self.help_open = not self.help_open
+            if self.help_open:
+                self.export_bank_open = False
+                self.playing = False
+                self.status = "Hotkey reference opened"
+            else:
+                self.status = "Hotkey reference closed"
+            return
+
+        if self.help_open:
+            self._handle_help_event(event)
+            return
 
         if self.export_bank_open:
             self._handle_export_bank_event(event)
@@ -930,6 +991,11 @@ class Editor:
             self.status = "Back to project animation"
         elif action == "export":
             self._open_export_bank()
+        elif action == "help":
+            self.help_open = True
+            self.export_bank_open = False
+            self.playing = False
+            self.status = "Hotkey reference opened"
         elif action == "edit_led_id":
             self.led_name_editing = False
             self.led_name_input = self._current_led().name
@@ -1335,10 +1401,11 @@ class Editor:
             "rotation": (0.0, 360.0), "gradient_angle": (0.0, 360.0),
             "stroke_width": (0.0, 0.05),
         }
-        values = [float(getattr(target, prop))] + [
-            float(frame.value) for frame in target.keyframes.get(prop, [])
-        ]
         frames = target.keyframes.get(prop, [])
+        values = (
+            [float(frame.value) for frame in frames]
+            if frames else [float(getattr(target, prop))]
+        )
         for before, after in zip(frames, frames[1:]):
             if after.easing != "bezier" or after.bezier is None:
                 continue
@@ -2343,6 +2410,7 @@ class Editor:
 
     def _open_export_bank(self) -> None:
         self.export_bank_open = True
+        self.help_open = False
         self.playing = False
         self.export_bank_selected = -1
         self.export_bank_scroll = 0
@@ -2993,6 +3061,8 @@ class Editor:
         self._draw_context_menu()
         if self.export_bank_open:
             self._draw_export_bank()
+        if self.help_open:
+            self._draw_help()
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -3028,6 +3098,8 @@ class Editor:
             active = (action == "stencil" and self.stencil) or (action == "calibration" and self.calibration)
             self._button(rect, action, label, active)
             x += button_width + 7
+
+        self._button(pygame.Rect(width - 52, 11, 36, 32), "help", "?", False)
 
         duration_field = self._duration_input_rect()
         imported = self._active_imported_effect()
@@ -4083,6 +4155,79 @@ class Editor:
         panel = pygame.Rect(0, 0, width, height)
         panel.center = self.screen.get_rect().center
         return panel
+
+    def _handle_help_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.help_open = False
+            self.status = "Hotkey reference closed"
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        close = next(
+            (
+                rect for rect, action, _label in reversed(self.buttons)
+                if action == "help_close"
+            ),
+            None,
+        )
+        if close and close.collidepoint(event.pos):
+            self.help_open = False
+            self.status = "Hotkey reference closed"
+
+    def _help_panel_rect(self) -> pygame.Rect:
+        width = min(980, self.screen.get_width() - 60)
+        height = min(700, self.screen.get_height() - 60)
+        panel = pygame.Rect(0, 0, width, height)
+        panel.center = self.screen.get_rect().center
+        return panel
+
+    def _draw_help(self) -> None:
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((7, 9, 13, 222))
+        self.screen.blit(shade, (0, 0))
+        panel = self._help_panel_rect()
+        pygame.draw.rect(self.screen, (25, 28, 36), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (77, 84, 102), panel, 1, border_radius=10)
+        x, y = panel.x + 28, panel.y + 22
+        self.screen.blit(self.title.render("HOTKEYS / HELP", True, (238, 241, 248)), (x, y))
+        self.screen.blit(
+            self.small.render(
+                "Keyboard and mouse reference · F1 opens this window · Esc closes it",
+                True, (143, 153, 174),
+            ),
+            (x, y + 32),
+        )
+        self._button(pygame.Rect(panel.right - 76, y, 50, 32), "help_close", "×", False)
+
+        content_y = panel.y + 84
+        gap = 34
+        column_width = (panel.width - 56 - gap) // 2
+        for column_index, sections in enumerate(HELP_COLUMNS):
+            column_x = panel.x + 28 + column_index * (column_width + gap)
+            cursor_y = content_y
+            for section_title, rows in sections:
+                self.screen.blit(
+                    self.font.render(section_title, True, (113, 184, 255)),
+                    (column_x, cursor_y),
+                )
+                cursor_y += 29
+                for key, description in rows:
+                    badge = pygame.Rect(column_x, cursor_y, 132, 22)
+                    pygame.draw.rect(self.screen, (42, 48, 61), badge, border_radius=4)
+                    pygame.draw.rect(self.screen, (74, 83, 103), badge, 1, border_radius=4)
+                    key_surface = self.small.render(key, True, (239, 242, 248))
+                    self.screen.blit(key_surface, key_surface.get_rect(center=badge.center))
+                    description_surface = self.small.render(
+                        self._fit_text(description, self.small, column_width - 146),
+                        True, (183, 190, 207),
+                    )
+                    self.screen.blit(description_surface, (badge.right + 12, cursor_y + 4))
+                    cursor_y += 26
+                cursor_y += 14
+
+        footer = "Tip: hover buttons for labels; timeline markers remain visible on inactive layers."
+        footer_surface = self.small.render(footer, True, (112, 123, 145))
+        self.screen.blit(footer_surface, (x, panel.bottom - 31))
 
     def _draw_export_bank(self) -> None:
         shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)

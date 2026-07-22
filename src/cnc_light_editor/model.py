@@ -44,8 +44,11 @@ class RandomLedEffect:
         frames.sort(key=lambda frame: frame.time_ms)
 
     def value_at(self, prop: str, time_ms: int) -> Any:
-        value = getattr(self, prop)
-        for frame in self.keyframes.get(prop, []):
+        frames = self.keyframes.get(prop, [])
+        if not frames:
+            return getattr(self, prop)
+        value = frames[0].value
+        for frame in frames:
             if frame.time_ms > time_ms:
                 break
             value = frame.value
@@ -85,8 +88,10 @@ class Shape:
     def value_at(self, prop: str, time_ms: int) -> Any:
         base = getattr(self, prop)
         frames = self.keyframes.get(prop, [])
-        if not frames or time_ms < frames[0].time_ms:
+        if not frames:
             return base
+        if time_ms < frames[0].time_ms:
+            return frames[0].value
         before = frames[0]
         after = None
         for frame in frames[1:]:
@@ -133,8 +138,11 @@ class Layer:
         frames.sort(key=lambda frame: frame.time_ms)
 
     def value_at(self, prop: str, time_ms: int) -> Any:
-        value = getattr(self, prop)
-        for frame in self.keyframes.get(prop, []):
+        frames = self.keyframes.get(prop, [])
+        if not frames:
+            return getattr(self, prop)
+        value = frames[0].value
+        for frame in frames:
             if frame.time_ms > time_ms:
                 break
             value = frame.value

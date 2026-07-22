@@ -117,6 +117,23 @@ def test_overlay_canvas_layer_switches_empty_cells_between_black_and_sentinel(tm
     assert frames[1][0] == (255, 0, 255)
 
 
+def test_export_uses_first_future_keyframe_value_before_its_timestamp(tmp_path):
+    shape = Shape(
+        "rectangle", "future color", width=1.0, height=1.0, color=(0, 0, 0),
+    )
+    shape.add_keyframe("color", 50, (90, 120, 150))
+    project = Project(
+        "backward hold", duration_ms=100, frame_ms=50,
+        layers=[Layer("art", shapes=[shape])],
+    )
+
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "hold.h")
+    frames = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames
+
+    assert frames[0][0] == (90, 120, 150)
+    assert frames[1][0] == (90, 120, 150)
+
+
 def test_overlay_export_preserves_opaque_black_and_avoids_real_magenta_collision(tmp_path):
     black = Shape("rectangle", "black", x=0.25, width=0.2, height=1.0, color=(0, 0, 0))
     magenta = Shape("rectangle", "magenta", x=0.75, width=0.2, height=1.0, color=(255, 0, 255))
