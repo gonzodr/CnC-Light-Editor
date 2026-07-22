@@ -419,6 +419,61 @@ def test_graph_keyframe_right_click_opens_easing_menu():
     assert editor.context_menu_pos == point
 
 
+def test_context_menu_converts_selected_keyframe_to_custom_bezier_and_undoes():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    shape = editor.selected
+    shape.add_keyframe("x", 0, 0.2)
+    shape.add_keyframe("x", 1000, 0.8)
+    editor.selected_keyframes = {(shape.id, "x", 1000)}
+
+    editor._apply_keyframe_context("custom_bezier")
+
+    destination = shape.keyframes["x"][1]
+    assert destination.easing == "bezier"
+    assert destination.bezier == (0.25, 0.10, 0.25, 1.0)
+    editor._undo()
+    restored = editor._find_keyframe_target(shape.id)
+    assert restored.keyframes["x"][1].easing == "linear"
+    assert restored.keyframes["x"][1].bezier is None
+
+
+def test_graph_editor_bezier_handle_drag_updates_controls_and_undoes():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    shape = editor.selected
+    shape.add_keyframe("x", 0, 0.0)
+    shape.add_keyframe("x", 1000, 1.0)
+    editor.selected_keyframes = {(shape.id, "x", 1000)}
+    editor._apply_keyframe_context("custom_bezier")
+    editor.graph_target_id = shape.id
+    editor.graph_prop = "x"
+    editor.timeline_mode = "graph"
+    _, _, timeline = editor.layout()
+    handles = editor._bezier_handle_points(timeline)
+    start = handles[1]
+    target_x = round(editor._time_to_timeline_x(400, timeline))
+    target_y = editor._graph_area(timeline).top
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": start},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {"pos": (target_x, target_y), "rel": (0, 0), "buttons": (1, 0, 0)},
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"button": 1, "pos": (target_x, target_y)},
+    ))
+
+    destination = shape.keyframes["x"][1]
+    assert abs(destination.bezier[0] - 0.4) < 0.02
+    assert abs(destination.bezier[1] - 1.0) < 0.02
+    editor._undo()
+    restored = editor._find_keyframe_target(shape.id)
+    assert restored.keyframes["x"][1].bezier == (0.25, 0.10, 0.25, 1.0)
+
+
 def test_canvas_mode_is_an_undoable_export_setting():
     editor = make_editor()
     editor.draw()

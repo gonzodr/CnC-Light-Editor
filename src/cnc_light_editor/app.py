@@ -45,6 +45,7 @@ GRAPH_NUMERIC_PROPERTIES = {
     "x", "y", "width", "height", "rotation", "opacity",
     "stroke_width", "gradient_angle",
 }
+DEFAULT_BEZIER = (0.25, 0.10, 0.25, 1.0)
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class Editor:
         self.graph_prop: str | None = None
         self.graph_drag_records: list[tuple[Shape, str, Keyframe, int, float]] = []
         self.graph_drag_value_range: tuple[float, float] | None = None
+        self.graph_drag_handle: tuple[str, str, int, int] | None = None
         self.undo_stack: list[Project] = []
         self.redo_stack: list[Project] = []
         self.change_snapshot: Project | None = None
@@ -310,6 +312,10 @@ class Editor:
                     return
             if timeline.collidepoint(event.pos):
                 if self.timeline_mode == "graph" and not self._active_imported_effect():
+                    handle = self._pick_bezier_handle(event.pos, timeline)
+                    if handle:
+                        self._start_bezier_handle_drag(handle)
+                        return
                     keys = self._pick_graph_key(event.pos, timeline)
                     if keys:
                         if pygame.key.get_mods() & pygame.KMOD_CTRL:
@@ -398,6 +404,8 @@ class Editor:
                     self.drag_layer_index = None
                 if self.drag_mode == "graph_keyframe":
                     self._finish_graph_drag()
+                elif self.drag_mode == "bezier_handle":
+                    self._finish_bezier_handle_drag()
                 open_stroke_input = (
                     self.drag_mode == "scrub"
                     and self.scrub_prop == "stroke_width"
@@ -435,6 +443,8 @@ class Editor:
                 self._move_keyframe(event.pos[0], timeline)
             elif self.drag_mode == "graph_keyframe":
                 self._move_graph_keyframes(event.pos, timeline)
+            elif self.drag_mode == "bezier_handle":
+                self._move_bezier_handle(event.pos, timeline)
             elif self.drag_mode == "keyframe_marquee":
                 self.keyframe_marquee_current = event.pos
             elif self.drag_mode == "duration":
@@ -1212,11 +1222,23 @@ class Editor:
             "rotation": (0.0, 360.0), "gradient_angle": (0.0, 360.0),
             "stroke_width": (0.0, 0.05),
         }
-        if prop in fixed:
-            return fixed[prop]
         values = [float(getattr(target, prop))] + [
             float(frame.value) for frame in target.keyframes.get(prop, [])
         ]
+        frames = target.keyframes.get(prop, [])
+        for before, after in zip(frames, frames[1:]):
+            if after.easing != "bezier" or after.bezier is None:
+                continue
+            delta = float(after.value) - float(before.value)
+            values.extend([
+                float(before.value) + delta * float(after.bezier[1]),
+                float(before.value) + delta * float(after.bezier[3]),
+            ])
+        if prop in fixed:
+            base_low, base_high = fixed[prop]
+            if min(values) >= base_low and max(values) <= base_high:
+                return base_low, base_high
+            values.extend((base_low, base_high))
         low, high = min(values), max(values)
         if math.isclose(low, high):
             padding = max(0.05, abs(low) * 0.35)
@@ -1257,6 +1279,120 @@ class Editor:
             return set()
         distance, time_ms = min(candidates)
         return {(target.id, prop, time_ms)} if distance <= 11 else set()
+
+    def _selected_bezier_segment(
+        self,
+    ) -> tuple[Shape, str, Keyframe, Keyframe] | None:
+        channel = self._graph_channel()
+        if not channel:
+            return None
+        target, prop = channel
+        selected_times = {
+            time_ms for target_id, selected_prop, time_ms in self.selected_keyframes
+            if target_id == target.id and selected_prop == prop
+        }
+        frames = target.keyframes[prop]
+        for index, after in enumerate(frames[1:], start=1):
+            if (
+                after.time_ms in selected_times and after.easing == "bezier"
+                and after.bezier is not None
+            ):
+                return target, prop, frames[index - 1], after
+        return None
+
+    def _bezier_handle_points(
+        self, timeline: pygame.Rect,
+        segment: tuple[Shape, str, Keyframe, Keyframe] | None = None,
+        value_range: tuple[float, float] | None = None,
+    ) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int], tuple[int, int]] | None:
+        segment = segment or self._selected_bezier_segment()
+        if not segment:
+            return None
+        target, prop, before, after = segment
+        x1, y1, x2, y2 = after.bezier or DEFAULT_BEZIER
+        span = after.time_ms - before.time_ms
+        delta = float(after.value) - float(before.value)
+        value_range = value_range or self._graph_value_range(target, prop)
+        return (
+            self._graph_point(before.time_ms, float(before.value), timeline, value_range),
+            self._graph_point(
+                round(before.time_ms + span * x1),
+                float(before.value) + delta * y1,
+                timeline, value_range,
+            ),
+            self._graph_point(
+                round(before.time_ms + span * x2),
+                float(before.value) + delta * y2,
+                timeline, value_range,
+            ),
+            self._graph_point(after.time_ms, float(after.value), timeline, value_range),
+        )
+
+    def _pick_bezier_handle(
+        self, pos: tuple[int, int], timeline: pygame.Rect
+    ) -> tuple[str, str, int, int] | None:
+        segment = self._selected_bezier_segment()
+        points = self._bezier_handle_points(timeline, segment)
+        if not segment or not points:
+            return None
+        target, prop, _before, after = segment
+        for handle_index, point in ((1, points[1]), (2, points[2])):
+            if pygame.Vector2(pos).distance_to(point) <= 10:
+                return target.id, prop, after.time_ms, handle_index
+        return None
+
+    def _start_bezier_handle_drag(
+        self, handle: tuple[str, str, int, int]
+    ) -> None:
+        channel = self._graph_channel()
+        if not channel:
+            return
+        self.graph_drag_handle = handle
+        self.graph_drag_value_range = self._graph_value_range(*channel)
+        self.drag_mode = "bezier_handle"
+        self._begin_change()
+
+    def _move_bezier_handle(self, pos: tuple[int, int], timeline: pygame.Rect) -> None:
+        if not self.graph_drag_handle:
+            return
+        target_id, prop, after_time, handle_index = self.graph_drag_handle
+        target = self._find_keyframe_target(target_id)
+        if not isinstance(target, Shape):
+            return
+        frames = target.keyframes.get(prop, [])
+        after_index = next(
+            (index for index, frame in enumerate(frames) if frame.time_ms == after_time),
+            None,
+        )
+        if after_index is None or after_index == 0:
+            return
+        before, after = frames[after_index - 1], frames[after_index]
+        controls = list(after.bezier or DEFAULT_BEZIER)
+        span = max(1, after.time_ms - before.time_ms)
+        handle_time = self._timeline_x_to_time(pos[0], timeline)
+        normalized_x = max(0.0, min(1.0, (handle_time - before.time_ms) / span))
+
+        low, high = self.graph_drag_value_range or self._graph_value_range(target, prop)
+        area = self._graph_area(timeline)
+        screen_ratio = (area.bottom - pos[1]) / max(1, area.height)
+        handle_value = low + screen_ratio * (high - low)
+        delta = float(after.value) - float(before.value)
+        normalized_y = controls[1 if handle_index == 1 else 3]
+        if not math.isclose(delta, 0.0):
+            normalized_y = max(-2.0, min(3.0, (handle_value - float(before.value)) / delta))
+        offset = 0 if handle_index == 1 else 2
+        controls[offset] = round(normalized_x, 4)
+        controls[offset + 1] = round(normalized_y, 4)
+        after.easing = "bezier"
+        after.bezier = tuple(controls)
+        self.selected_keyframes = {(target.id, prop, after.time_ms)}
+        self.status = (
+            f"Bezier H{handle_index}: {controls[offset]:.3f}, {controls[offset + 1]:.3f}"
+        )
+
+    def _finish_bezier_handle_drag(self) -> None:
+        self.graph_drag_handle = None
+        self.graph_drag_value_range = None
 
     def _start_graph_drag(
         self, keys: set[tuple[str, str, int]], pos: tuple[int, int]
@@ -1725,16 +1861,24 @@ class Editor:
                 continue
             for frame in target.keyframes.get(prop, []):
                 if frame.time_ms == time_ms:
-                    frame.easing = action
+                    if action == "custom_bezier":
+                        frame.easing = "bezier"
+                        frame.bezier = frame.bezier or DEFAULT_BEZIER
+                    else:
+                        frame.easing = action
         self._commit_change()
-        self.status = action.replace("_", " ").title()
+        self.status = (
+            "Custom Bezier — edit handles in Graph Editor"
+            if action == "custom_bezier" else action.replace("_", " ").title()
+        )
 
     def _context_menu_items(self) -> list[tuple[pygame.Rect, str, str]]:
         if not self.context_menu_pos:
             return []
         labels = [
             ("linear", "Linear"), ("ease_in", "Ease In"), ("ease_out", "Ease Out"),
-            ("ease_in_out", "Ease In / Out"), ("delete", "Delete keyframe"),
+            ("ease_in_out", "Ease In / Out"), ("custom_bezier", "Custom Bezier"),
+            ("delete", "Delete keyframe"),
         ]
         width, row_height = 150, 28
         x = min(self.context_menu_pos[0], self.screen.get_width() - width - 6)
@@ -2652,6 +2796,17 @@ class Editor:
         if len(curve_points) >= 2:
             pygame.draw.lines(self.screen, (82, 202, 255), False, curve_points, 2)
 
+        handle_points = self._bezier_handle_points(
+            timeline, self._selected_bezier_segment(), (low, high)
+        )
+        if handle_points:
+            p0, p1, p2, p3 = handle_points
+            pygame.draw.line(self.screen, (119, 104, 196), p0, p1, 1)
+            pygame.draw.line(self.screen, (119, 104, 196), p3, p2, 1)
+            for point in (p1, p2):
+                pygame.draw.circle(self.screen, (32, 35, 45), point, 6)
+                pygame.draw.circle(self.screen, (174, 143, 255), point, 6, 2)
+
         frames = target.keyframes[prop]
         for before, after in zip(frames, frames[1:]):
             midpoint = (before.time_ms + after.time_ms) // 2
@@ -2659,7 +2814,7 @@ class Editor:
                 continue
             label = {
                 "linear": "LIN", "ease_in": "IN", "ease_out": "OUT",
-                "ease_in_out": "IN/OUT",
+                "ease_in_out": "IN/OUT", "bezier": "BEZIER",
             }.get(after.easing, after.easing.upper())
             x = round(self._time_to_timeline_x(midpoint, timeline))
             badge = self.small.render(label, True, (119, 170, 202))

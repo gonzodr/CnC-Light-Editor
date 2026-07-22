@@ -15,6 +15,7 @@ class Keyframe:
     time_ms: int
     value: Any
     easing: str = "linear"
+    bezier: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -96,7 +97,7 @@ class Shape:
             return before.value
         span = after.time_ms - before.time_ms
         amount = 0.0 if span == 0 else (time_ms - before.time_ms) / span
-        amount = _ease(amount, after.easing)
+        amount = _ease(amount, after.easing, after.bezier)
         return _lerp(before.value, after.value, amount)
 
     def state_at(self, time_ms: int) -> dict[str, Any]:
@@ -183,6 +184,10 @@ class Project:
                     prop: [Keyframe(**frame) for frame in frames]
                     for prop, frames in shape_raw.pop("keyframes", {}).items()
                 }
+                for frames in keyframes.values():
+                    for frame in frames:
+                        if frame.bezier is not None:
+                            frame.bezier = tuple(frame.bezier)
                 for frame in keyframes.get("color", []):
                     frame.value = tuple(frame.value)
                 if "color" in shape_raw:
@@ -198,6 +203,10 @@ class Project:
                     prop: [Keyframe(**frame) for frame in frames]
                     for prop, frames in effect_raw.pop("keyframes", {}).items()
                 }
+                for frames in keyframes.values():
+                    for frame in frames:
+                        if frame.bezier is not None:
+                            frame.bezier = tuple(frame.bezier)
                 if "color" in effect_raw:
                     effect_raw["color"] = tuple(effect_raw["color"])
                 effects.append(RandomLedEffect(**effect_raw, keyframes=keyframes))
@@ -214,8 +223,24 @@ def _lerp(a: Any, b: Any, amount: float) -> Any:
     return round(a + (b - a) * amount, 12)
 
 
-def _ease(amount: float, easing: str) -> float:
+def _ease(
+    amount: float, easing: str,
+    bezier: tuple[float, float, float, float] | None = None,
+) -> float:
     amount = max(0.0, min(1.0, amount))
+    if easing == "bezier" and bezier is not None:
+        x1, y1, x2, y2 = bezier
+        x1 = max(0.0, min(1.0, float(x1)))
+        x2 = max(0.0, min(1.0, float(x2)))
+        low, high = 0.0, 1.0
+        for _iteration in range(22):
+            parameter = (low + high) / 2.0
+            x = _cubic_bezier(parameter, x1, x2)
+            if x < amount:
+                low = parameter
+            else:
+                high = parameter
+        return _cubic_bezier((low + high) / 2.0, float(y1), float(y2))
     if easing == "ease_in":
         return amount * amount
     if easing == "ease_out":
@@ -223,3 +248,12 @@ def _ease(amount: float, easing: str) -> float:
     if easing == "ease_in_out":
         return amount * amount * (3.0 - 2.0 * amount)
     return amount
+
+
+def _cubic_bezier(parameter: float, control_1: float, control_2: float) -> float:
+    inverse = 1.0 - parameter
+    return (
+        3.0 * inverse * inverse * parameter * control_1
+        + 3.0 * inverse * parameter * parameter * control_2
+        + parameter * parameter * parameter
+    )

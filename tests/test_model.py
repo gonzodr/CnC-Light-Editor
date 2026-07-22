@@ -47,6 +47,36 @@ def test_easing_changes_interpolation_curve():
     assert shape.value_at("x", 500) == 0.5
 
 
+def test_custom_bezier_easing_supports_linear_and_overshoot_curves():
+    shape = Shape("ellipse", "bezier", x=0.0)
+    shape.add_keyframe("x", 0, 0.0)
+    shape.add_keyframe("x", 1000, 1.0)
+    destination = shape.keyframes["x"][1]
+    destination.easing = "bezier"
+    destination.bezier = (0.0, 0.0, 1.0, 1.0)
+    assert abs(shape.value_at("x", 500) - 0.5) < 0.00001
+
+    destination.bezier = (0.34, 1.56, 0.64, 1.0)
+    assert shape.value_at("x", 500) > 1.0
+
+
+def test_project_round_trip_preserves_custom_bezier_controls(tmp_path):
+    shape = Shape("ellipse", "bezier")
+    shape.add_keyframe("opacity", 0, 0.0)
+    shape.add_keyframe("opacity", 1000, 1.0)
+    shape.keyframes["opacity"][1].easing = "bezier"
+    shape.keyframes["opacity"][1].bezier = (0.2, -0.4, 0.7, 1.6)
+    project = Project(layers=[Layer("bezier", shapes=[shape])])
+    path = tmp_path / "bezier.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+    frame = loaded.layers[0].shapes[0].keyframes["opacity"][1]
+
+    assert frame.easing == "bezier"
+    assert frame.bezier == (0.2, -0.4, 0.7, 1.6)
+
+
 def test_stroked_shape_only_reaches_border_leds():
     shape = Shape(
         "rectangle", "outline", x=0.5, y=0.5, width=0.6, height=0.6,
