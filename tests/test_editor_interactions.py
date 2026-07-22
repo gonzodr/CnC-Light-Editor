@@ -19,7 +19,7 @@ def make_editor() -> Editor:
     screen = pygame.display.get_surface()
     if screen is None or screen.get_size() != (1280, 900):
         screen = pygame.display.set_mode((1280, 900))
-    editor = Editor(screen)
+    editor = Editor(screen, check_recovery=False)
     editor.project = Project("interaction test")
     editor.selected = None
     editor.undo_stack.clear()
@@ -31,7 +31,7 @@ def test_native_1280x1024_workspace_and_resolution_parser():
     assert _parse_resolution("1280x1024") == (1280, 1024)
     pygame.init()
     screen = pygame.display.set_mode((1280, 1024), pygame.RESIZABLE)
-    editor = Editor(screen)
+    editor = Editor(screen, check_recovery=False)
     editor.project = Project(layers=[Layer(f"Layer {index + 1}") for index in range(8)])
 
     canvas, panel, timeline = editor.layout()
@@ -42,6 +42,42 @@ def test_native_1280x1024_workspace_and_resolution_parser():
     editor.draw()
     actions = {action for _rect, action, _label in editor.buttons}
     assert "rename_layer:7" in actions
+
+
+def test_timeline_resize_drag_clamps_resets_and_persists(tmp_path):
+    pygame.init()
+    screen = pygame.display.set_mode((1280, 1024), pygame.RESIZABLE)
+    settings_path = tmp_path / "editor_settings.json"
+    editor = Editor(screen, settings_path=settings_path, check_recovery=False)
+    editor.draw()
+    _canvas, _panel, timeline = editor.layout()
+    handle = next(rect for rect, action, _label in editor.buttons if action == "timeline_resize_handle")
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, button=1, pos=handle.center, clicks=1,
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION, pos=(handle.centerx, 680), rel=(0, -120), buttons=(1, 0, 0),
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, button=1, pos=(handle.centerx, 680),
+    ))
+
+    assert editor.timeline_height == 344
+    restored = Editor(screen, settings_path=settings_path, check_recovery=False)
+    assert restored.timeline_height == 344
+
+    restored.draw()
+    reset_handle = next(
+        rect for rect, action, _label in restored.buttons if action == "timeline_resize_handle"
+    )
+    restored.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, button=1, pos=reset_handle.center, clicks=2,
+    ))
+    assert restored.timeline_height == 218
+
+    restored.timeline_height = 9999
+    assert restored.layout()[2].height == 520
 
 
 def test_canvas_layer_is_unique_undoable_and_owns_a_timeline_channel():
@@ -1089,6 +1125,34 @@ def test_new_button_starts_a_blank_unsaved_project_without_dialog():
     assert editor.undo_stack == []
 
 
+def test_autosave_recovery_restores_unsaved_project_and_manual_save_clears_it(tmp_path):
+    pygame.init()
+    screen = pygame.display.set_mode((1280, 900))
+    source_project = Project("Recovered sparkle", layers=[Layer("Recovered layer")])
+    autosave_dir = tmp_path / "autosave"
+    source_path = tmp_path / "recovered.cnclight"
+
+    writer = Editor(screen, autosave_directory=autosave_dir, check_recovery=False)
+    writer.project = source_project
+    writer.project_path = source_path
+    assert writer._maybe_autosave(force=True, now_ms=30_000) is True
+
+    editor = Editor(screen, autosave_directory=autosave_dir, check_recovery=True)
+    assert editor.recovery_open is True
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"recovery_restore", "recovery_discard"} <= actions
+    assert editor._recover_autosave() is True
+    assert editor.project.name == "Recovered sparkle"
+    assert editor.project.layers[0].name == "Recovered layer"
+    assert editor.project_path == source_path.resolve()
+    assert editor._project_is_dirty() is True
+
+    editor.save_project_file(source_path)
+    assert editor.autosave_manager.latest() is None
+    assert editor._project_is_dirty() is False
+
+
 def test_ctrl_n_starts_a_new_project():
     editor = make_editor()
     editor.saved_project_state = editor.project.to_dict()
@@ -1298,6 +1362,23 @@ def test_gradient_panel_exposes_type_stop_and_angle_controls():
     actions = {action for _rect, action, _label in editor.buttons}
 
     assert {"gradient_type:linear", "gradient_type:radial", "gradient_bar", "gradient_angle"} <= actions
+
+
+def test_stroke_style_exposes_and_keeps_gradient_editor_open():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor._action("fill_mode:stroke")
+    editor.draw()
+
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"scrub:stroke_width", "gradient_editor"} <= actions
+
+    editor._action("gradient_editor")
+    editor._action("gradient_type:linear")
+    editor.draw()
+
+    assert editor.gradient_editor_open is True
+    assert "Gradient stroke" in editor.status
 
 
 def test_radial_gradient_panel_switches_between_radius_and_angular_modes():

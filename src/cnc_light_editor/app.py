@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pygame
 
+from .autosave import AutosaveManager, RecoveryRecord
 from .engine import point_inside, render_leds, sample_gradient
 from .effect_importer import ImportedEffect, load_effect_data
 from .exporter import (
@@ -20,10 +21,17 @@ from .exporter import (
 )
 from .ledmap import Led, LedMap
 from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
+from .property_widgets import (
+    NumericPropertySpec,
+    RANDOM_LED_PROPERTY_SPECS,
+    SHAPE_PROPERTY_SPECS,
+)
+from .ui_settings import UiSettingsStore
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "projects" / "current.cnclight"
 EXPORT_FILE = ROOT / "exports" / "effect_data.h"
+AUTOSAVE_DIR = ROOT / "projects" / ".autosave"
 WINDOW_ICON = ROOT / "assets" / "CnC_LightE_ico.png"
 PALETTE = [
     (255, 70, 40), (255, 155, 20), (255, 230, 50), (80, 220, 90),
@@ -41,6 +49,7 @@ HELP_COLUMNS = (
             ("Ctrl + Shift + S", "Save project as"),
             ("Ctrl + O", "Load project"),
             ("Ctrl + I", "Import effect_data.h"),
+            ("Autosave", "Recovery snapshot every 30 seconds"),
             ("Ctrl + Z", "Undo"),
             ("Ctrl + Shift + Z", "Redo"),
         )),
@@ -53,6 +62,7 @@ HELP_COLUMNS = (
             ("G", "Toggle snapping"),
             ("Mouse wheel", "Zoom timeline"),
             ("Shift + wheel", "Scroll timeline horizontally"),
+            ("Drag top edge", "Resize timeline; double-click resets"),
             ("Right-drag", "Marquee-select keyframes"),
         )),
     ),
@@ -87,9 +97,14 @@ HELP_COLUMNS = (
 TOP_BAR = 54
 TOOLBAR_WIDTH = 68
 INSPECTOR_WIDTH = 318
-TIMELINE_HEIGHT = 218
+DEFAULT_TIMELINE_HEIGHT = 218
+MIN_TIMELINE_HEIGHT = 150
+MAX_TIMELINE_HEIGHT = 520
+MIN_VIEWPORT_HEIGHT = 260
 DEFAULT_WINDOW_SIZE = (1280, 1024)
 MIN_WINDOW_SIZE = (1024, 720)
+AUTOSAVE_INTERVAL_MS = 30_000
+UI_SETTINGS_FILE = ROOT / "projects" / ".editor_settings.json"
 ACCENT = (77, 148, 255)
 PANEL = (31, 34, 42)
 PANEL_DARK = (24, 26, 33)
@@ -125,7 +140,14 @@ class Editor:
     _cached_playfield: pygame.Surface | None = None
     _cached_layout_guide: pygame.Surface | None = None
 
-    def __init__(self, screen: pygame.Surface):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        *,
+        autosave_directory: str | Path = AUTOSAVE_DIR,
+        settings_path: str | Path = UI_SETTINGS_FILE,
+        check_recovery: bool = True,
+    ):
         self.screen = screen
         self.window_flags = pygame.FULLSCREEN if pygame.display.is_fullscreen() else pygame.RESIZABLE
         self.clock = pygame.time.Clock()
@@ -135,6 +157,18 @@ class Editor:
         self.project = Project("First playfield effect")
         self.project_path: Path | None = None
         self.saved_project_state: dict | None = None
+        self.autosave_manager = AutosaveManager(autosave_directory)
+        self.ui_settings_store = UiSettingsStore(settings_path)
+        self.ui_settings = self.ui_settings_store.load()
+        self.timeline_height = self._clamp_timeline_height(
+            self.ui_settings.get("timeline_height", DEFAULT_TIMELINE_HEIGHT)
+        )
+        self.autosave_interval_ms = AUTOSAVE_INTERVAL_MS
+        self.last_autosave_tick = pygame.time.get_ticks()
+        self.recovery_record: RecoveryRecord | None = (
+            self.autosave_manager.latest() if check_recovery else None
+        )
+        self.recovery_open = self.recovery_record is not None
         self.last_window_caption = ""
         self.current_ms = 0
         self.playing = False
@@ -260,6 +294,7 @@ class Editor:
                     self.handle_event(event)
             if self.playing:
                 self.current_ms = (self.current_ms + dt) % max(1, self._playback_duration())
+            self._maybe_autosave()
             self.draw()
             pygame.display.flip()
             frames += 1
@@ -270,13 +305,16 @@ class Editor:
 
     def layout(self) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect]:
         width, height = self.screen.get_size()
+        self.timeline_height = self._clamp_timeline_height(self.timeline_height)
         workspace = pygame.Rect(
             TOOLBAR_WIDTH, TOP_BAR,
             max(300, width - TOOLBAR_WIDTH - INSPECTOR_WIDTH),
-            max(260, height - TOP_BAR - TIMELINE_HEIGHT),
+            max(MIN_VIEWPORT_HEIGHT, height - TOP_BAR - self.timeline_height),
         )
         panel = pygame.Rect(width - INSPECTOR_WIDTH, TOP_BAR, INSPECTOR_WIDTH, height - TOP_BAR)
-        timeline = pygame.Rect(TOOLBAR_WIDTH, height - TIMELINE_HEIGHT, workspace.width, TIMELINE_HEIGHT)
+        timeline = pygame.Rect(
+            TOOLBAR_WIDTH, height - self.timeline_height, workspace.width, self.timeline_height,
+        )
         viewport = pygame.Rect(workspace.x, workspace.y, workspace.width, workspace.height)
         image_ratio = self.playfield.get_width() / self.playfield.get_height()
         draw_h = int(viewport.height * 0.94 * self.zoom)
@@ -295,10 +333,15 @@ class Editor:
                 max(MIN_WINDOW_SIZE[1], int(event.h)),
             )
             self.screen = pygame.display.set_mode(size, self.window_flags)
+            self.timeline_height = self._clamp_timeline_height(self.timeline_height)
             self.status = f"Workspace resized to {size[0]}×{size[1]}"
             return
         canvas, panel, timeline = self.layout()
         viewport = pygame.Rect(TOOLBAR_WIDTH, TOP_BAR, panel.x - TOOLBAR_WIDTH, timeline.y - TOP_BAR)
+
+        if self.recovery_open:
+            self._handle_recovery_event(event)
+            return
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
             self.help_open = not self.help_open
@@ -427,6 +470,17 @@ class Editor:
                         self.drag_origin = event.pos
                         self._begin_change()
                         self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
+                    elif action == "timeline_resize_handle":
+                        if getattr(event, "clicks", 1) >= 2:
+                            self.timeline_height = self._clamp_timeline_height(
+                                DEFAULT_TIMELINE_HEIGHT
+                            )
+                            self._save_ui_settings()
+                            self.status = f"Timeline reset to {self.timeline_height} px"
+                        else:
+                            self.drag_mode = "timeline_resize"
+                            self.drag_origin = event.pos
+                            self.status = "Drag to resize the timeline"
                     elif action.startswith("scrub:") and self.selected:
                         self.scrub_prop = action.split(":", 1)[1]
                         self.property_editing = None
@@ -549,6 +603,11 @@ class Editor:
                 self._finish_keyframe_right_gesture(event.pos, timeline)
                 return
             if event.button in (1, 2):
+                if self.drag_mode == "timeline_resize":
+                    self.drag_mode = None
+                    self._save_ui_settings()
+                    self.status = f"Timeline height: {self.timeline_height} px"
+                    return
                 if self.drag_mode == "led_move":
                     return
                 if self.tool_drag:
@@ -592,12 +651,7 @@ class Editor:
                     prop = self.scrub_prop
                     value = float(self.selected.state_at(self.current_ms)[prop])
                     self.property_editing = prop
-                    self.property_input = (
-                        f"{value:.1f}" if prop == "rotation"
-                        else f"{value:.0f}" if prop == "rotation_turns"
-                        else f"{value * 100:.1f}" if prop in {"feather", "mask_expansion"}
-                        else f"{value:.3f}"
-                    )
+                    self.property_input = SHAPE_PROPERTY_SPECS[prop].input_text(value)
                     self.property_input_select_all = True
                     self.status = f"Type {TIMELINE_PROPERTY_LABELS[prop]}, then press Enter"
                 elif open_random_effect_input and self.scrub_prop:
@@ -623,6 +677,11 @@ class Editor:
                 self.keyframe_marquee_current = event.pos
             elif self.drag_mode == "duration":
                 self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
+            elif self.drag_mode == "timeline_resize":
+                self.timeline_height = self._clamp_timeline_height(
+                    self.screen.get_height() - event.pos[1]
+                )
+                self._clamp_timeline_layer_scroll(self.layout()[2])
             elif self.drag_mode == "led_move":
                 self._move_selected_led(event.pos, canvas)
             elif self.drag_mode == "scrub":
@@ -661,6 +720,25 @@ class Editor:
                 new_canvas, _, _ = self.layout()
                 new_screen = self._world_to_screen(old_point, new_canvas)
                 self.pan += pygame.Vector2(mouse) - pygame.Vector2(new_screen)
+
+    def _clamp_timeline_height(self, value: object) -> int:
+        try:
+            requested = int(value)
+        except (TypeError, ValueError):
+            requested = DEFAULT_TIMELINE_HEIGHT
+        available = max(
+            MIN_TIMELINE_HEIGHT,
+            self.screen.get_height() - TOP_BAR - MIN_VIEWPORT_HEIGHT,
+        )
+        maximum = min(MAX_TIMELINE_HEIGHT, available)
+        return max(MIN_TIMELINE_HEIGHT, min(maximum, requested))
+
+    def _save_ui_settings(self) -> None:
+        self.ui_settings["timeline_height"] = self.timeline_height
+        try:
+            self.ui_settings_store.save(self.ui_settings)
+        except OSError:
+            self.status = "Timeline resized, but its UI preference could not be saved"
 
     def _handle_key(self, event: pygame.event.Event) -> None:
         ctrl = bool(event.mod & pygame.KMOD_CTRL)
@@ -1020,7 +1098,8 @@ class Editor:
         elif action.startswith("gradient_type:") and self.selected:
             gradient_type = action.split(":", 1)[1]
             self._set_animated("gradient_type", gradient_type)
-            self.status = f"Gradient fill: {gradient_type}"
+            target = self.selected.state_at(self.current_ms).get("fill_mode", "fill")
+            self.status = f"Gradient {target}: {gradient_type}"
         elif action.startswith("gradient_radial_mode:") and self.selected:
             radial_mode = action.split(":", 1)[1]
             self._set_animated("gradient_radial_mode", radial_mode)
@@ -2372,26 +2451,8 @@ class Editor:
                 total = round(total)
             self._set_rotation_total(total)
             return
-        sensitivity = 0.002 if prop in {"x", "y", "width", "height", "opacity"} else 0.5
-        if prop == "stroke_width":
-            sensitivity = 0.00025
-        elif prop in {"feather", "mask_expansion"}:
-            sensitivity = 0.00025
-        elif prop == "rotation_turns":
-            sensitivity = 0.02
-        value = start + delta * sensitivity
-        if prop in {"x", "y", "opacity"}:
-            value = max(0.0, min(1.0, value))
-        elif prop in {"width", "height"}:
-            value = max(0.01, value)
-        elif prop == "stroke_width":
-            value = max(0.001, min(0.05, value))
-        elif prop == "feather":
-            value = max(0.0, min(0.1, value))
-        elif prop == "mask_expansion":
-            value = max(-0.1, min(0.1, value))
-        elif prop == "rotation_turns":
-            value = max(-100.0, min(100.0, round(value)))
+        spec = SHAPE_PROPERTY_SPECS[prop]
+        value = spec.normalize(start + delta * spec.sensitivity)
         if self.snap:
             step = 0.001 if prop in {"stroke_width", "feather", "mask_expansion"} else 0.01
             value = round(value / step) * step
@@ -2407,17 +2468,10 @@ class Editor:
 
     @staticmethod
     def _normalize_random_effect_parameter(prop: str, value: float) -> float | int:
-        if prop == "seed":
-            return max(0, min(2147483647, int(round(value))))
-        if prop == "life_ms":
-            return max(50, min(10000, int(round(value))))
-        if prop == "born_speed":
-            return round(max(0.5, min(100.0, float(value))), 1)
-        if prop == "particle_count":
-            return max(1, min(68, int(round(value))))
-        if prop == "opacity":
-            return round(max(0.0, min(1.0, float(value))), 4)
-        raise ValueError(f"Unknown Random LED parameter: {prop}")
+        try:
+            return RANDOM_LED_PROPERTY_SPECS[prop].normalize(value)
+        except KeyError as error:
+            raise ValueError(f"Unknown Random LED parameter: {prop}") from error
 
     def _set_random_effect_parameter(
         self, effect: RandomLedEffect, prop: str, value: float,
@@ -2440,16 +2494,10 @@ class Editor:
         if not effect or not self.scrub_prop or self.random_effect_drag_start is None:
             return
         prop = self.scrub_prop
-        sensitivities = {
-            "seed": 1.0,
-            "life_ms": 5.0,
-            "born_speed": 0.1,
-            "particle_count": 0.2,
-            "opacity": 0.005,
-        }
+        spec = RANDOM_LED_PROPERTY_SPECS[prop]
         value = float(self.random_effect_drag_start) + (
             screen_x - self.drag_origin[0]
-        ) * sensitivities[prop]
+        ) * spec.sensitivity
         normalized = self._set_random_effect_parameter(effect, prop, value)
         self.status = self._random_effect_parameter_status(prop, normalized)
 
@@ -2459,34 +2507,18 @@ class Editor:
             return
         value = self._random_effect_parameter_value(effect, prop, self.current_ms)
         self.random_effect_editing = prop
-        self.random_effect_input = (
-            f"{float(value) * 100:.1f}" if prop == "opacity"
-            else f"{float(value):g}" if prop == "born_speed"
-            else str(int(value))
-        )
+        self.random_effect_input = RANDOM_LED_PROPERTY_SPECS[prop].input_text(value)
         self.random_effect_input_select_all = True
         self.status = f"Type {self._random_effect_parameter_label(prop)}, then press Enter"
 
     @staticmethod
     def _random_effect_parameter_label(prop: str) -> str:
-        return {
-            "seed": "Random seed",
-            "life_ms": "Life",
-            "born_speed": "Born speed",
-            "particle_count": "Max active",
-            "opacity": "Opacity",
-        }[prop]
+        return RANDOM_LED_PROPERTY_SPECS[prop].label
 
     @staticmethod
     def _random_effect_parameter_status(prop: str, value: float | int) -> str:
-        label = Editor._random_effect_parameter_label(prop)
-        if prop == "life_ms":
-            return f"{label}: {int(value)} ms"
-        if prop == "born_speed":
-            return f"{label}: {float(value):g} / sec"
-        if prop == "opacity":
-            return f"{label}: {float(value) * 100:.1f}%"
-        return f"{label}: {int(value)}"
+        spec = RANDOM_LED_PROPERTY_SPECS[prop]
+        return f"{spec.label}: {spec.display_text(value)}"
 
     def _set_animated(self, prop: str, value) -> None:
         if not self.selected:
@@ -2576,6 +2608,53 @@ class Editor:
     def _project_is_dirty(self) -> bool:
         return self.saved_project_state is None or self.project.to_dict() != self.saved_project_state
 
+    def _maybe_autosave(self, *, force: bool = False, now_ms: int | None = None) -> bool:
+        now = pygame.time.get_ticks() if now_ms is None else int(now_ms)
+        if self.recovery_open or not self._project_is_dirty():
+            return False
+        if not force and now - self.last_autosave_tick < self.autosave_interval_ms:
+            return False
+        try:
+            path = self.autosave_manager.write(self.project.to_dict(), self.project_path)
+            self.recovery_record = self.autosave_manager.latest()
+            self.status = f"Autosaved recovery snapshot: {path.name}"
+            return True
+        except (OSError, TypeError, ValueError) as error:
+            self.status = f"Autosave failed: {error}"
+            return False
+        finally:
+            self.last_autosave_tick = now
+
+    def _recover_autosave(self) -> bool:
+        record = self.recovery_record
+        if record is None:
+            self.recovery_open = False
+            return False
+        try:
+            project = Project.from_dict(record.project_data)
+        except (TypeError, ValueError, KeyError, AttributeError) as error:
+            self.status = f"Recovery snapshot is invalid: {error}"
+            return False
+        self._install_project(
+            project,
+            record.source_path,
+            saved=False,
+            status="Recovered autosave — save the project to keep it",
+        )
+        self.recovery_open = False
+        self.last_autosave_tick = pygame.time.get_ticks()
+        return True
+
+    def _discard_autosave(self) -> None:
+        try:
+            self.autosave_manager.clear()
+        except OSError as error:
+            self.status = f"Could not discard recovery snapshot: {error}"
+            return
+        self.recovery_record = None
+        self.recovery_open = False
+        self.status = "Discarded autosave recovery"
+
     def save_project_file(self, path: str | Path) -> None:
         target = Path(path)
         if target.suffix.lower() != ".cnclight":
@@ -2584,10 +2663,12 @@ class Editor:
         self.project_path = target.resolve()
         self.saved_project_state = deepcopy(self.project.to_dict())
         self.status = f"Saved project: {target.name}"
+        self._clear_recovery_snapshots()
 
     def load_project_file(self, path: str | Path) -> None:
         target = Path(path)
         project = Project.load(target)
+        self._clear_recovery_snapshots()
         self._install_project(
             project, target.resolve(), saved=True, status=f"Loaded project: {target.name}",
         )
@@ -2638,6 +2719,15 @@ class Editor:
         self.change_snapshot = None
         self.status = status
 
+    def _clear_recovery_snapshots(self) -> bool:
+        try:
+            self.autosave_manager.clear()
+        except OSError:
+            return False
+        self.recovery_record = None
+        self.recovery_open = False
+        return True
+
     def _confirm_replace_project(self, title: str, message: str) -> bool:
         if not self._project_is_dirty():
             return True
@@ -2670,6 +2760,7 @@ class Editor:
         self._install_project(
             Project("Untitled effect"), None, saved=False, status="New blank project",
         )
+        self._clear_recovery_snapshots()
         return True
 
     def _save_current_project(self) -> None:
@@ -2894,6 +2985,9 @@ class Editor:
         except (TypeError, ValueError, KeyError) as error:
             self.export_bank_status = f"Embedded project is invalid: {error}"
             return False
+        self.autosave_manager.clear()
+        self.recovery_record = None
+        self.recovery_open = False
         self._install_project(
             project,
             None,
@@ -3287,11 +3381,13 @@ class Editor:
             except ValueError:
                 self.status = "Stroke width must be a number"
                 return
-            if not 0.1 <= percent <= 5.0:
+            spec = SHAPE_PROPERTY_SPECS["stroke_width"]
+            low, high = spec.input_limits()
+            if not low <= percent <= high:
                 self.status = "Stroke width must be between 0.1 and 5.0"
                 return
             self._begin_change()
-            self._set_animated("stroke_width", percent / 100.0)
+            self._set_animated("stroke_width", spec.from_input(percent))
             self._commit_change()
             self.stroke_editing = False
             self.status = f"Stroke width: {percent:.1f} / 5.0"
@@ -3339,20 +3435,14 @@ class Editor:
             except ValueError:
                 self.status = f"{self._random_effect_parameter_label(prop)} must be a number"
                 return
-            input_limits = {
-                "seed": (0.0, 2147483647.0),
-                "life_ms": (50.0, 10000.0),
-                "born_speed": (0.5, 100.0),
-                "particle_count": (1.0, 68.0),
-                "opacity": (0.0, 100.0),
-            }
-            low, high = input_limits[prop]
-            if not low <= entered <= high:
+            spec = RANDOM_LED_PROPERTY_SPECS[prop]
+            low, high = spec.input_limits()
+            if (low is not None and entered < low) or (high is not None and entered > high):
                 self.status = (
                     f"{self._random_effect_parameter_label(prop)} must be {low:g}–{high:g}"
                 )
                 return
-            value = entered / 100.0 if prop == "opacity" else entered
+            value = spec.from_input(entered)
             self._begin_change()
             normalized = self._set_random_effect_parameter(effect, prop, value)
             self._commit_change()
@@ -3408,25 +3498,16 @@ class Editor:
             return
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
             try:
-                value = float(self.property_input.replace(",", "."))
+                entered = float(self.property_input.replace(",", "."))
             except ValueError:
                 self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be a number"
                 return
-            if prop in {"feather", "mask_expansion"}:
-                value /= 100.0
-            limits = {
-                "x": (0.0, 1.0), "y": (0.0, 1.0),
-                "width": (0.01, 5.0), "height": (0.01, 5.0),
-                "opacity": (0.0, 1.0),
-                "rotation_turns": (-100.0, 100.0),
-                "feather": (0.0, 0.1), "mask_expansion": (-0.1, 0.1),
-            }
-            if prop in limits and not limits[prop][0] <= value <= limits[prop][1]:
-                low, high = limits[prop]
-                if prop in {"feather", "mask_expansion"}:
-                    low, high = low * 100.0, high * 100.0
+            spec = SHAPE_PROPERTY_SPECS[prop]
+            low, high = spec.input_limits()
+            if (low is not None and entered < low) or (high is not None and entered > high):
                 self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be {low:g}–{high:g}"
                 return
+            value = spec.from_input(entered)
             self._begin_change()
             if prop == "rotation":
                 state = self.selected.state_at(self.current_ms)
@@ -3449,9 +3530,7 @@ class Editor:
                 state = self.selected.state_at(self.current_ms)
                 self.status = f"Rotation: {state['rotation']:.1f}° ×{state['rotation_turns']:.0f}"
             else:
-                display_value = value * 100.0 if prop in {"feather", "mask_expansion"} else value
-                suffix = "%" if prop in {"feather", "mask_expansion"} else ""
-                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {display_value:.3f}{suffix}"
+                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {spec.display_text(value)}"
             return
         if event.key == pygame.K_ESCAPE:
             self.property_editing = None
@@ -3530,6 +3609,8 @@ class Editor:
             self._draw_export_bank()
         if self.help_open:
             self._draw_help()
+        if self.recovery_open:
+            self._draw_recovery_dialog()
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -3653,8 +3734,7 @@ class Editor:
                     surface.get_size(), shape.kind, local, state, canvas_scale,
                 )
                 gradient = (
-                    state.get("fill_mode", "fill") == "fill"
-                    and state.get("gradient_type", "solid") in {"linear", "radial"}
+                    state.get("gradient_type", "solid") in {"linear", "radial"}
                     and len(state.get("gradient_stops", [])) >= 2
                 )
                 if gradient:
@@ -3969,6 +4049,14 @@ class Editor:
     def _draw_timeline(self, rect: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, (29, 32, 40), rect)
         pygame.draw.line(self.screen, (67, 72, 86), rect.topleft, rect.topright)
+        resize_handle = pygame.Rect(rect.x, rect.y, rect.width, 8)
+        resize_hovered = resize_handle.collidepoint(pygame.mouse.get_pos())
+        if resize_hovered or self.drag_mode == "timeline_resize":
+            pygame.draw.rect(self.screen, (42, 58, 82), resize_handle)
+        grip_x = rect.centerx
+        pygame.draw.line(self.screen, (104, 135, 180), (grip_x - 22, rect.y + 3), (grip_x + 22, rect.y + 3), 1)
+        pygame.draw.line(self.screen, (82, 105, 140), (grip_x - 14, rect.y + 6), (grip_x + 14, rect.y + 6), 1)
+        self.buttons.append((resize_handle, "timeline_resize_handle", "Resize timeline"))
         track = self._timeline_track(rect)
         pygame.draw.rect(self.screen, (22, 24, 30), track)
         pygame.draw.line(self.screen, (68, 73, 87), (track.x, track.y), (track.x, track.bottom))
@@ -4211,7 +4299,7 @@ class Editor:
                 return
             self.random_led_editor_open = False
         if self.gradient_editor_open:
-            if self.selected and self.selected.state_at(self.current_ms).get("fill_mode") == "fill":
+            if self.selected:
                 self._draw_gradient_panel(panel, x)
                 return
             self.gradient_editor_open = False
@@ -4304,43 +4392,21 @@ class Editor:
             self.screen.blit(kind, (panel.right - kind.get_width() - 14, y))
             y += 27
             properties = [
-                ("x", "X", state["x"]), ("y", "Y", state["y"]),
-                ("width", "W", state["width"]), ("height", "H", state["height"]),
-                ("rotation", "ROT", state["rotation"]),
-                ("rotation_turns", "TURNS", state["rotation_turns"]),
-                ("opacity", "OPACITY", state["opacity"]),
-                ("feather", "FEATHER", state["feather"]),
-                ("mask_expansion", "EXPAND", state["mask_expansion"]),
+                (prop, state[prop]) for prop in (
+                    "x", "y", "width", "height", "rotation", "rotation_turns",
+                    "opacity", "feather", "mask_expansion",
+                )
             ]
-            for index, (prop, label, value) in enumerate(properties):
+            for index, (prop, value) in enumerate(properties):
                 col = index % 2
                 row = index // 2
                 field = pygame.Rect(x + col * 143, y + row * 37, 132, 30)
-                hovered = field.collidepoint(pygame.mouse.get_pos())
                 editing = self.property_editing == prop
-                pygame.draw.rect(
-                    self.screen, (49, 57, 72) if editing or hovered else (40, 44, 54),
-                    field, border_radius=4,
+                self._numeric_property_widget(
+                    field, SHAPE_PROPERTY_SPECS[prop], value, f"scrub:{prop}",
+                    editing=editing,
+                    input_text=self.property_input if editing else "",
                 )
-                pygame.draw.rect(
-                    self.screen, ACCENT if editing or hovered else (67, 72, 86),
-                    field, 1, border_radius=4,
-                )
-                if editing:
-                    value_text = self.property_input
-                    if (pygame.time.get_ticks() // 500) % 2 == 0:
-                        value_text += "|"
-                else:
-                    value_text = (
-                        f"{value:.1f}°" if prop == "rotation"
-                        else f"×{value:.0f}" if prop == "rotation_turns"
-                        else f"{value * 100:.1f}%" if prop in {"feather", "mask_expansion"}
-                        else f"{value:.3f}"
-                    )
-                self.screen.blit(self.small.render(label, True, (130, 138, 157)), (field.x + 7, field.y + 7))
-                rendered = self.small.render(value_text, True, (231, 234, 242))
-                self.screen.blit(rendered, (field.right - rendered.get_width() - 7, field.y + 7))
-                self.buttons.append((field, f"scrub:{prop}", label))
             y += 193
             self.screen.blit(self.small.render("Style", True, (172, 178, 193)), (x, y))
             y += 23
@@ -4355,22 +4421,19 @@ class Editor:
             y += 37
             if state.get("fill_mode", "fill") == "stroke":
                 stroke_field = pygame.Rect(x, y, 275, 30)
-                pygame.draw.rect(self.screen, (40, 44, 54), stroke_field, border_radius=4)
-                pygame.draw.rect(self.screen, (67, 72, 86), stroke_field, 1, border_radius=4)
-                self.screen.blit(self.small.render("Stroke width", True, (148, 155, 173)), (stroke_field.x + 8, stroke_field.y + 7))
-                stroke_percent = state.get("stroke_width", 0.012) * 100
-                stroke_value = self.stroke_input if self.stroke_editing else f"{stroke_percent:.1f}"
-                if self.stroke_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
-                    stroke_value += "|"
-                stroke_text = self.small.render(f"{stroke_value} / 5.0", True, (231, 234, 242))
-                self.screen.blit(stroke_text, (stroke_field.right - stroke_text.get_width() - 8, stroke_field.y + 7))
-                self.buttons.append((stroke_field, "scrub:stroke_width", "Stroke width"))
-            else:
-                gradient_type = state.get("gradient_type", "solid").title()
-                self._button(
-                    pygame.Rect(x, y, 275, 30), "gradient_editor",
-                    f"Gradient fill…  {gradient_type}", gradient_type != "Solid",
+                self._numeric_property_widget(
+                    stroke_field, SHAPE_PROPERTY_SPECS["stroke_width"],
+                    state.get("stroke_width", 0.012), "scrub:stroke_width",
+                    editing=self.stroke_editing,
+                    input_text=self.stroke_input if self.stroke_editing else "",
                 )
+                y += 37
+            gradient_type = state.get("gradient_type", "solid").title()
+            paint_target = "stroke" if state.get("fill_mode", "fill") == "stroke" else "fill"
+            self._button(
+                pygame.Rect(x, y, 275, 30), "gradient_editor",
+                f"Gradient {paint_target}…  {gradient_type}", gradient_type != "Solid",
+            )
             y += 42
             self.screen.blit(self.small.render("Color", True, (172, 178, 193)), (x, y))
             y += 24
@@ -4441,55 +4504,29 @@ class Editor:
         self._button(pygame.Rect(x + 207, y - 6, 68, 30), "random_led_keyframe", "State key", False)
         y += 42
 
-        def parameter_row(prop: str, label: str, value: float | int) -> None:
+        def parameter_row(prop: str, value: float | int) -> None:
             nonlocal y
             row = pygame.Rect(x, y, 275, 34)
-            hovered = row.collidepoint(pygame.mouse.get_pos())
             editing = self.random_effect_editing == prop
-            pygame.draw.rect(
-                self.screen, (49, 57, 72) if editing or hovered else (39, 43, 53),
-                row, border_radius=4,
-            )
-            pygame.draw.rect(
-                self.screen, ACCENT if editing or hovered else (67, 72, 86),
-                row, 1, border_radius=4,
-            )
-            self.screen.blit(self.small.render(label, True, (151, 158, 176)), (row.x + 8, row.y + 9))
-            if editing:
-                value_text = self.random_effect_input
-                if (pygame.time.get_ticks() // 500) % 2 == 0:
-                    value_text += "|"
-            elif prop == "life_ms":
-                value_text = f"{int(value)} ms"
-            elif prop == "born_speed":
-                value_text = f"{float(value):g} / sec"
-            elif prop == "opacity":
-                value_text = f"{float(value) * 100:.1f}%"
-            else:
-                value_text = str(int(value))
             has_key = prop == "opacity" and any(
                 frame.time_ms == self.current_ms
                 for frame in effect.keyframes.get("opacity", [])
             )
-            value_right = row.right - (45 if prop == "opacity" else 9)
-            rendered = self.small.render(value_text, True, (235, 238, 245))
-            self.screen.blit(rendered, (value_right - rendered.get_width(), row.y + 9))
-            field = pygame.Rect(row) if prop != "opacity" else pygame.Rect(
-                row.x, row.y, row.width - 39, row.height,
+            self._numeric_property_widget(
+                row, RANDOM_LED_PROPERTY_SPECS[prop], value,
+                f"random_led_field:{prop}",
+                editing=editing,
+                input_text=self.random_effect_input if editing else "",
+                key_action="random_led_opacity_keyframe" if prop == "opacity" else None,
+                key_active=has_key,
             )
-            self.buttons.append((field, f"random_led_field:{prop}", f"{label} — drag or click to type"))
-            if prop == "opacity":
-                self._button(
-                    pygame.Rect(row.right - 35, row.y + 3, 31, 28),
-                    "random_led_opacity_keyframe", "+K", has_key,
-                )
             y += 42
 
-        parameter_row("seed", "Random seed", effect.seed)
-        parameter_row("life_ms", "Life", effect.life_ms)
-        parameter_row("born_speed", "Born speed", effect.born_speed)
-        parameter_row("particle_count", "Max active", effect.particle_count)
-        parameter_row("opacity", "Opacity", float(effect.value_at("opacity", self.current_ms)))
+        parameter_row("seed", effect.seed)
+        parameter_row("life_ms", effect.life_ms)
+        parameter_row("born_speed", effect.born_speed)
+        parameter_row("particle_count", effect.particle_count)
+        parameter_row("opacity", float(effect.value_at("opacity", self.current_ms)))
 
         y += 5
         self.screen.blit(self.small.render("Flash color", True, (172, 178, 193)), (x, y)); y += 25
@@ -4528,7 +4565,10 @@ class Editor:
         selected_stop = self._selected_gradient_stop()
 
         y = panel.y + 78
-        self.screen.blit(self.font.render("GRADIENT FILL", True, (225, 229, 238)), (x, y))
+        paint_target = "STROKE" if state.get("fill_mode", "fill") == "stroke" else "FILL"
+        self.screen.blit(
+            self.font.render(f"GRADIENT {paint_target}", True, (225, 229, 238)), (x, y)
+        )
         self._button(pygame.Rect(panel.right - 82, y - 4, 68, 28), "gradient_back", "< Back", False)
         y += 34
         self.screen.blit(self.small.render(self.selected.name, True, (118, 184, 255)), (x, y))
@@ -4701,6 +4741,71 @@ class Editor:
         for tip in tips:
             self.screen.blit(self.small.render(tip, True, (168, 173, 188)), (x, y)); y += 21
         self.screen.blit(self.small.render(self.status, True, (95, 215, 160)), (x, panel.bottom - 28))
+
+    def _handle_recovery_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_r):
+                self._recover_autosave()
+            elif event.key in (pygame.K_d, pygame.K_DELETE, pygame.K_BACKSPACE):
+                self._discard_autosave()
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        action = next(
+            (
+                action for rect, action, _label in reversed(self.buttons)
+                if action.startswith("recovery_") and rect.collidepoint(event.pos)
+            ),
+            None,
+        )
+        if action == "recovery_restore":
+            self._recover_autosave()
+        elif action == "recovery_discard":
+            self._discard_autosave()
+
+    def _draw_recovery_dialog(self) -> None:
+        record = self.recovery_record
+        if record is None:
+            self.recovery_open = False
+            return
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((7, 9, 13, 228))
+        self.screen.blit(shade, (0, 0))
+        panel = pygame.Rect(0, 0, min(650, self.screen.get_width() - 70), 310)
+        panel.center = self.screen.get_rect().center
+        pygame.draw.rect(self.screen, (25, 29, 38), panel, border_radius=11)
+        pygame.draw.rect(self.screen, (88, 99, 122), panel, 1, border_radius=11)
+        x, y = panel.x + 30, panel.y + 25
+        self.screen.blit(self.title.render("RECOVER UNSAVED PROJECT", True, (239, 242, 248)), (x, y))
+        y += 46
+        self.screen.blit(
+            self.font.render("CnC Light Editor found a newer autosave snapshot.", True, (194, 202, 219)),
+            (x, y),
+        )
+        y += 34
+        source = str(record.source_path) if record.source_path else "Untitled project"
+        rows = (
+            ("Project", record.project_data.get("name", "Untitled effect")),
+            ("Original file", source),
+            ("Autosaved", record.saved_at.replace("T", " ").replace("+00:00", " UTC")),
+        )
+        for label, value in rows:
+            self.screen.blit(self.small.render(label, True, (126, 138, 162)), (x, y))
+            fitted = self._fit_text(str(value), self.small, panel.width - 175)
+            self.screen.blit(self.small.render(fitted, True, (226, 231, 240)), (x + 125, y))
+            y += 27
+        self.screen.blit(
+            self.small.render("Recover restores the editable project; it remains unsaved until Ctrl+S.", True, (142, 153, 176)),
+            (x, panel.bottom - 78),
+        )
+        self._button(
+            pygame.Rect(x, panel.bottom - 48, 200, 32),
+            "recovery_restore", "Recover project", True,
+        )
+        self._button(
+            pygame.Rect(x + 215, panel.bottom - 48, 170, 32),
+            "recovery_discard", "Discard snapshot", False,
+        )
 
     def _export_bank_panel_rect(self) -> pygame.Rect:
         width = min(1120, self.screen.get_width() - 50)
@@ -4981,6 +5086,49 @@ class Editor:
             color = (255, 118, 105) if destructive else (231, 234, 242)
             self.screen.blit(self.small.render(label, True, color), (rect.x + 10, rect.y + 7))
 
+    def _numeric_property_widget(
+        self,
+        rect: pygame.Rect,
+        spec: NumericPropertySpec,
+        value: float | int,
+        action: str,
+        *,
+        editing: bool = False,
+        input_text: str = "",
+        key_action: str | None = None,
+        key_active: bool = False,
+    ) -> pygame.Rect:
+        key_width = 39 if key_action else 0
+        field = pygame.Rect(rect.x, rect.y, rect.width - key_width, rect.height)
+        hovered = field.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(
+            self.screen, (49, 57, 72) if editing or hovered else (40, 44, 54),
+            rect, border_radius=4,
+        )
+        pygame.draw.rect(
+            self.screen, ACCENT if editing or hovered else (67, 72, 86),
+            field, 1, border_radius=4,
+        )
+        self.screen.blit(
+            self.small.render(spec.label, True, (140, 148, 168)),
+            (field.x + 8, field.y + 8),
+        )
+        value_text = input_text if editing else spec.display_text(value)
+        if editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            value_text += "|"
+        rendered = self.small.render(value_text, True, (235, 238, 245))
+        self.screen.blit(
+            rendered,
+            (field.right - rendered.get_width() - 8, field.y + 8),
+        )
+        self.buttons.append((field, action, f"{spec.label} — drag or click to type"))
+        if key_action:
+            self._button(
+                pygame.Rect(rect.right - 35, rect.y + 3, 31, rect.height - 6),
+                key_action, "+K", key_active,
+            )
+        return field
+
     def _button(self, rect: pygame.Rect, action: str, label: str, active: bool) -> None:
         color = (77, 99, 150) if active else (49, 54, 68)
         pygame.draw.rect(self.screen, color, rect, border_radius=4)
@@ -5024,7 +5172,7 @@ def main() -> None:
     screen = pygame.display.set_mode(args.resolution, flags)
     pygame.display.set_caption("CnC Pinball — Light Effect Editor")
     try:
-        editor = Editor(screen)
+        editor = Editor(screen, check_recovery=not args.smoke_test)
         if args.effect_data:
             editor.load_effect_data_file(args.effect_data)
         editor.run(args.smoke_test, args.screenshot)

@@ -259,6 +259,22 @@ def test_linear_gradient_is_shared_by_led_renderer():
     ]
 
 
+def test_linear_gradient_paints_only_the_stroke_mask():
+    shape = Shape(
+        "rectangle", "gradient stroke", width=0.8, height=0.8,
+        fill_mode="stroke", stroke_width=0.1,
+        gradient_type="linear", gradient_angle=0,
+        gradient_stops=[GradientStop(0.0, (200, 0, 0)), GradientStop(1.0, (0, 0, 200))],
+    )
+    project = Project(layers=[Layer("gradient stroke", shapes=[shape])])
+
+    left, center, right = render_leds(project, [(0.15, 0.5), (0.5, 0.5), (0.85, 0.5)], 0)
+
+    assert left[0] > left[2]
+    assert center == (0, 0, 0)
+    assert right[2] > right[0]
+
+
 def test_radial_gradient_runs_from_center_to_shape_edge():
     shape = Shape(
         "ellipse", "radial", width=1.0, height=1.0,

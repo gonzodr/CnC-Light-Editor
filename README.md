@@ -17,7 +17,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Pozíció-, scale-, több teljes fordulatot megőrző forgatás-, szín-, opacity-, stroke- és visibility-keyframe.
 - Linear, Ease In, Ease Out és Ease In/Out interpoláció, kijelölhető keyframe-ek és idővonalas lejátszás.
 - Fill/stroke alakzatmód, állítható körvonalvastagság, keyframe-elhető peremlágyítás (Feather) és pozitív/negatív Mask Expansion.
-- Solid, tetszőleges számú húzható színstoppal szerkeszthető Linear és Radial gradient fill; a Radial lehet sugárirányú vagy forgásirányú, a Linear iránya és az Angular kezdőfázisa 0–360° között állítható.
+- Solid, tetszőleges számú húzható színstoppal szerkeszthető Linear és Radial gradient fill vagy gradient stroke; a Radial lehet sugárirányú vagy forgásirányú, a Linear iránya és az Angular kezdőfázisa 0–360° között állítható.
 - Layer-szintű, shape-független Random LED / Sparkle effekt determinisztikus seeddel, life, born speed, maximális aktív elemszám, szín és interpolálható opacity paraméterekkel. Az enabled állapot és az opacity keyframe-elhető.
 - Edit nézet: a DXF-ből képzett fehér vonalas guide jelenik meg sötét háttéren.
 - Stencil mód: nagy, additívan keveredő fényforrások világítanak az alfa-lyukas playfield artwork mögött.
@@ -26,6 +26,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - A `NULL` nevű LED-slotok előnézetben kikapcsolva maradnak; `OVERLAY` exportban alapból átlátszó sentinelt kapnak, nem fekete pixelt.
 - Az export validálja a `0..67` firmware-sorrendet és frame-enként pontosan 68 × RGB, azaz 204 bájtot generál.
 - JSON projektmentés és visszatöltés, valamint mentetlen munkára figyelmeztető `New` projektindítás.
+- Forgó, három példányos automatikus recovery-mentés és induláskor megjelenő Recover/Discard ablak; a kézi projektmentés után a recovery-pillanatképek automatikusan törlődnek.
 - A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops`, `loopFrames` és `overlay` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
 - Külön Effect Bank / Export ablak a meglévő `effect_data.h` feltérképezéséhez, több effekt együttes újraexportálásához és a fix 150 KiB flash-keret vizuális tervezéséhez. Az editor által exportált effektek a szerkeszthető projektjüket is hordozzák tömörített kommentként, és közvetlenül visszatölthetők a bankból.
 
@@ -63,7 +64,7 @@ Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a 
 - Méretezés: húzd a négy sarokfogópont egyikét.
 - Forgatás: húzd a kijelölés fölötti kör alakú fogópontot.
 - Zoom: egérgörgő a viewport felett; pásztázás: középső egérgomb vagy `Space` + húzás.
-- Inspector: az X/Y/W/H/ROT/TURNS/OPACITY mezőket vízszintesen húzva finoman állíthatod, kattintás után pedig közvetlenül beírhatod az értéket. A `ROT` a körön belüli szög, a `TURNS ×N` a teljes fordulatok száma; például a `ROT` mezőbe írt `720` automatikusan `0.0° ×2` lesz, és két teljes fordulatként interpolálódik. A számbevitel támogatja a `Ctrl+A`, `Ctrl+V`, Enter és Esc műveleteket.
+- Inspector: az egységes numerikus property-mezőket vízszintesen húzva finoman állíthatod, rövid kattintás után pedig közvetlenül beírhatod az értéket. Ez az X/Y/W/H/ROT/TURNS/OPACITY/FEATHER/EXPAND/STROKE mezőkre és a Random LED összes paraméterére ugyanúgy érvényes. A `ROT` a körön belüli szög, a `TURNS ×N` a teljes fordulatok száma; például a `ROT` mezőbe írt `720` automatikusan `0.0° ×2` lesz, és két teljes fordulatként interpolálódik. A számbevitel támogatja a `Ctrl+A`, `Ctrl+V`, Enter és Esc műveleteket.
 - Layer-sorrend: húzd a layer sorát fel vagy le. Átnevezéshez nyomd meg a layer sorának `R` gombját, az `F2`-t, vagy kattints duplán a layer nevére az Inspectorban vagy a timeline-on; a névmező támogatja a `Ctrl+A` és `Ctrl+V` műveleteket. A timeline layernevére kattintva valóban kijelölöd a layert; ilyenkor a `Delete`/`Backspace` a teljes kijelölt layert törli. Az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig szintén törli az aktív layert.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.
@@ -75,11 +76,12 @@ Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a 
 - Keyframe easing/törlés: jobb kattintás a gyémántra.
 - Ha egy property első keyframe-je nem a timeline elején áll, az előtte lévő teljes üres szakasz automatikusan ennek az első keyframe-nek az értékét tartja. Ez minden animálható shape-, Random LED- és Canvas-tulajdonságra érvényes. Ha a legelső keyframe-et törlöd, az első megmaradó keyframe tölti ki visszafelé a timeline elejéig tartó szakaszt.
 - Timeline zoom: egérgörgő; vízszintes görgetés: `Shift` + egérgörgő. Frame-skálán a playhead és a húzott keyframe-ek mindig pontos frame-határra illeszkednek.
+- Timeline-magasság: húzd a timeline felső peremének közepén látható dupla fogantyút. A nagyobb panel több layer/property-sort mutat, a kisebb több helyet hagy a playfieldnek. Dupla kattintás a fogantyún visszaállítja az alapméretet; az editor a beállítást következő indításra is megjegyzi.
 - Nagy timeline-zoomnál az időskála automatikusan másodpercről `F0`, `F1`… frame-számozásra vált. Importált firmware-effektnél az effekt saját `frameMs` értékét használja.
 - Animáció hossza: a felső Length mezőbe beírható, vagy a mellette lévő csúszkával állítható 0,5–15 másodperc között.
 - Fill/stroke mód és stroke-vastagság: a Transform inspector Style részében. A stroke mező vízszintesen húzható, kattintás után pedig kézzel is beírható `0,1–5,0` között.
 - Feather és Mask Expansion: a Transform mezőkben százalékosan húzhatók vagy beírhatók. A Feather `0–10%` között lágyítja a maszk mindkét szélét, az Expansion `−10–+10%` között összehúzza vagy kitágítja. Mindkettő keyframe-elhető, és a lágyított LED-fényerő kerül a firmware-exportba is.
-- Gradient: Fill módban nyisd meg a `Gradient fill…` panelt. Kattints a colorbarra új stophoz, húzd a stopokat, majd adj színt a kijelölt stopnak. A Solid/Linear/Radial mód, a Radial `Radius/Angular` iránya, valamint a Linear angle és az Angular phase ugyanitt állítható.
+- Gradient: Fill módban a `Gradient fill…`, Stroke módban a `Gradient stroke…` panelt nyisd meg. Kattints a colorbarra új stophoz, húzd a stopokat, majd adj színt a kijelölt stopnak. A Solid/Linear/Radial mód, a Radial `Radius/Angular` iránya, valamint a Linear angle és az Angular phase ugyanitt állítható; Stroke módban ugyanez a színmező csak a körvonal maszkját festi.
 - Firmware V4: az Inspectorban állítható az explicit effekt-ID, a 20/25/≈30,3 FPS preset (`50/40/33 ms`), a loopok száma, valamint a playheadnél a loop vége. A `FULL/CANVAS` exportkapcsoló adja az `overlay` flaget; a panel élő flash- és lejátszási időbecslést mutat. A Layers fejléc `C+` gombja egyetlen, speciális Canvas réteget ad a projekthez. A Canvas kijelölésekor az Inspector `Enable key` és `Disable key` gombjai az aktuális playheadnél explicit állapot-keyframe-et írnak: Enable esetén az érintetlen LED-ek átlátszóak, Disable esetén fekete blackout értéket kapnak. A timeline ON/OFF gombja és a `V` gyorsbillentyű a két állapot között vált.
 - Random LED / Sparkle: az aktív layer `FX` gombjával nyitható. Nem használ shape-maszkot: közvetlenül a firmware LED-slotokat villogtatja. Minden numerikus mező vízszintesen húzható, rövid kattintás után pedig közvetlenül beírható; a számbevitel támogatja a `Ctrl+A` és `Ctrl+V` műveleteket. A Toggle az aktuális időnél állapotot vált, a `State key` megtartja az aktuális enabled állapotot. Az opacity mező `+K` gombja explicit opacity-keyframe-et ír, míg az opacity későbbi playheadnél történő húzása vagy beírása automatikusan keyframe-et készít.
 - Undo/redo: `Ctrl+Z`, `Ctrl+Shift+Z` vagy `Ctrl+Y`; aktív layer duplikálása: `Ctrl+D`.
@@ -95,6 +97,8 @@ A toolbar `Export` gombja az Effect Bank ablakot nyitja meg. A `Map header…` b
 Az exportált szerkesztőprojekt verziózott, zlibbel tömörített Base64 adatként, kizárólag `//` kommentekben kerül az adott RGB-tömb mellé. Az Arduino fordító figyelmen kívül hagyja, ezért nem fogyaszt a 150 KiB effektbankból és nem kerül a mikrokontroller flashébe. Régebbi vagy más eszközzel készült header továbbra is betölthető, de annál az Effect Bank csak a baked képkockákat tudja lejátszani; szerkeszthető projekt nélkül nem jelenik meg a visszatöltő gomb.
 
 A projektfájl helyét az első Save alkalmával lehet kiválasztani; a címsorban és a Save gombon látható `*` mentetlen módosítást jelez.
+
+Mentetlen módosítás közben az editor 30 másodpercenként forgó recovery-pillanatképet készít a `projects/.autosave` mappába. Váratlan leállás után a következő induláskor külön ablakban választható a legutóbbi érvényes állapot visszaállítása vagy elvetése. A recovery nem helyettesíti a névvel ellátott `.cnclight` projektmentést.
 
 A bal oldali `Import` gombbal válaszd ki a firmware `effect_data.h` fájlját. Az editor automatikusan stencil nézetre vált; a `Next FX` végiglépteti a `bakedEffects[]` leírókat, a `Project` pedig visszatér a szerkesztett animációhoz. `Ctrl+I` szintén megnyitja az importot. Parancssorból: `cnc-light-editor --effect-data "F:\...\effect_data.h"`.
 
