@@ -52,10 +52,20 @@ def shape_coverage(shape: Shape, state: dict, point: tuple[float, float]) -> flo
 
 
 def render_leds(project: Project, led_points: Iterable[tuple[float, float]], time_ms: int) -> list[Color]:
+    colors, _painted = render_leds_with_mask(project, led_points, time_ms)
+    return colors
+
+
+def render_leds_with_mask(
+    project: Project,
+    led_points: Iterable[tuple[float, float]],
+    time_ms: int,
+) -> tuple[list[Color], list[bool]]:
     points = list(led_points)
     result: list[tuple[float, float, float]] = [(0.0, 0.0, 0.0) for _point in points]
+    painted = [False for _point in points]
     for layer in project.layers:
-        if not layer.visible:
+        if not layer.visible or layer.is_canvas:
             continue
         shape_states = [(shape, shape.state_at(time_ms)) for shape in layer.shapes]
         random_led_overlays = _random_led_overlays(layer, points, time_ms)
@@ -68,12 +78,21 @@ def render_leds(project: Project, led_points: Iterable[tuple[float, float]], tim
                 if coverage <= 0.0:
                     continue
                 alpha = max(0.0, min(1.0, float(state["opacity"]))) * coverage
+                if alpha <= 0.0:
+                    continue
                 src = gradient_color(state, point)
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
+                painted[point_index] = True
             for src, alpha in random_led_overlays[point_index]:
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
+                if alpha > 0.0:
+                    painted[point_index] = True
             result[point_index] = color
-    return [tuple(max(0, min(255, int(round(channel)))) for channel in color) for color in result]
+    colors = [
+        tuple(max(0, min(255, int(round(channel)))) for channel in color)
+        for color in result
+    ]
+    return colors, painted
 
 
 def _random_led_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, float]]]:

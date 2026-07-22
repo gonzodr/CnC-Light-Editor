@@ -199,6 +199,22 @@ def test_v4_metadata_and_memory_estimates_round_trip(tmp_path):
     assert loaded.firmware_playback_ms == 9000
 
 
+def test_canvas_layer_enabled_state_is_stepped_keyframeable_and_persisted(tmp_path):
+    canvas = Layer("Canvas", is_canvas=True, canvas_enabled=False)
+    canvas.add_keyframe("canvas_enabled", 0, False)
+    canvas.add_keyframe("canvas_enabled", 500, True)
+    project = Project(overlay=True, layers=[Layer("Art"), canvas])
+    path = tmp_path / "canvas-layer.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.canvas_transparency_at(250) is False
+    assert loaded.canvas_transparency_at(500) is True
+    assert loaded.layers[1].is_canvas is True
+    assert [frame.time_ms for frame in loaded.layers[1].keyframes["canvas_enabled"]] == [0, 500]
+
+
 def test_old_project_fps_is_migrated_to_integer_frame_ms(tmp_path):
     path = tmp_path / "legacy.cnclight"
     path.write_text(json.dumps({"name": "old", "fps": 30, "layers": []}), encoding="utf-8")

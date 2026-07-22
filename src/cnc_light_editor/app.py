@@ -14,6 +14,7 @@ from .engine import point_inside, render_leds, sample_gradient
 from .effect_importer import ImportedEffect, load_effect_data
 from .exporter import (
     EFFECT_BANK_CAPACITY,
+    TRANSPARENT_SENTINEL,
     export_effect_bank,
     project_to_imported_effect,
 )
@@ -50,6 +51,7 @@ TIMELINE_PROPERTY_LABELS = {
     "gradient_type": "Gradient type", "gradient_radial_mode": "Radial mode",
     "gradient_angle": "Gradient angle", "visible": "Visibility",
     "enabled": "Enabled",
+    "canvas_enabled": "Canvas enabled",
 }
 GRAPH_NUMERIC_PROPERTIES = {
     "x", "y", "width", "height", "rotation", "rotation_turns", "opacity",
@@ -580,11 +582,15 @@ class Editor:
                 self._action("delete")
         elif event.key == pygame.K_k:
             self._action("keyframe")
-        elif event.key == pygame.K_v and self.selected:
-            state = self.selected.state_at(self.current_ms)
-            self._begin_change()
-            self._set_animated("visible", not state["visible"])
-            self._commit_change()
+        elif event.key == pygame.K_v:
+            layer = self.project.layers[self.active_layer]
+            if layer.is_canvas:
+                self._action(f"toggle_layer:{self.active_layer}")
+            elif self.selected:
+                state = self.selected.state_at(self.current_ms)
+                self._begin_change()
+                self._set_animated("visible", not state["visible"])
+                self._commit_change()
         elif event.key == pygame.K_LEFTBRACKET and self.selected:
             self._begin_change()
             self._set_rotation_total(self.selected.state_at(self.current_ms)["rotation_total"] - 5)
@@ -616,7 +622,7 @@ class Editor:
                 "gradient_radial_mode:", "toggle_layer:",
             ))
             or action in {
-                "layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
+                "layer", "canvas_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
                 "set_loop_end", "clear_loop_end", "toggle_overlay",
                 "gradient_add_stop", "gradient_delete_stop",
@@ -628,28 +634,57 @@ class Editor:
         if mutating:
             self._begin_change()
         if action.startswith("add:"):
-            self._create_shape(action.split(":", 1)[1], (0.5, 0.5), history=False)
+            if self.project.layers[self.active_layer].is_canvas:
+                self.status = "Select a regular layer before adding a shape"
+            else:
+                self._create_shape(action.split(":", 1)[1], (0.5, 0.5), history=False)
         elif action == "layer":
             self.project.layers.append(Layer(f"Layer {len(self.project.layers) + 1}"))
             self.active_layer = len(self.project.layers) - 1
             self.selected = None
             self._ensure_active_layer_visible()
+        elif action == "canvas_layer":
+            existing = next(
+                (index for index, layer in enumerate(self.project.layers) if layer.is_canvas),
+                None,
+            )
+            if existing is not None:
+                self.active_layer = existing
+                self.selected = None
+                self.random_led_editor_open = False
+                self.timeline_expanded_layers.add(self.project.layers[existing].id)
+                self.status = "The project already has a Canvas layer"
+            else:
+                canvas_layer = Layer("Canvas", is_canvas=True, canvas_enabled=True)
+                canvas_layer.add_keyframe("canvas_enabled", 0, True)
+                self.project.layers.append(canvas_layer)
+                self.project.overlay = True
+                self.active_layer = len(self.project.layers) - 1
+                self.selected = None
+                self.random_led_editor_open = False
+                self.selected_keyframes = {(canvas_layer.id, "canvas_enabled", 0)}
+                self.timeline_expanded_layers.add(canvas_layer.id)
+                self._ensure_active_layer_visible()
+                self.status = "Canvas layer added — ON means empty LEDs stay transparent"
         elif action == "duplicate_layer":
             source = self.project.layers[self.active_layer]
-            selected_index = source.shapes.index(self.selected) if self.selected in source.shapes else None
-            clone = deepcopy(source)
-            clone.id = uuid4().hex[:10]
-            clone.name = f"{source.name} copy"
-            for shape in clone.shapes:
-                shape.id = uuid4().hex[:10]
-            for effect in clone.effects:
-                effect.id = uuid4().hex[:10]
-            self.project.layers.insert(self.active_layer + 1, clone)
-            self.active_layer += 1
-            self.selected = clone.shapes[selected_index] if selected_index is not None else None
-            self.selected_keyframes.clear()
-            self.status = f"Duplicated layer: {source.name}"
-            self._ensure_active_layer_visible()
+            if source.is_canvas:
+                self.status = "A project can only have one Canvas layer"
+            else:
+                selected_index = source.shapes.index(self.selected) if self.selected in source.shapes else None
+                clone = deepcopy(source)
+                clone.id = uuid4().hex[:10]
+                clone.name = f"{source.name} copy"
+                for shape in clone.shapes:
+                    shape.id = uuid4().hex[:10]
+                for effect in clone.effects:
+                    effect.id = uuid4().hex[:10]
+                self.project.layers.insert(self.active_layer + 1, clone)
+                self.active_layer += 1
+                self.selected = clone.shapes[selected_index] if selected_index is not None else None
+                self.selected_keyframes.clear()
+                self.status = f"Duplicated layer: {source.name}"
+                self._ensure_active_layer_visible()
         elif action == "delete_layer":
             if len(self.project.layers) == 1:
                 self.status = "A project must keep at least one layer"
@@ -680,20 +715,28 @@ class Editor:
                     layer.shapes.append(clone)
                     self.selected = clone
                     break
-        elif action == "keyframe" and self.selected:
-            state = self.selected.state_at(self.current_ms)
-            for prop in (
-                "x", "y", "width", "height", "rotation", "rotation_turns", "color", "opacity",
-                "feather", "mask_expansion",
-                "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
-                "gradient_angle", "visible",
-            ):
-                self.selected.add_keyframe(prop, self.current_ms, state[prop])
-            self.selected_keyframes = {
-                (self.selected.id, prop, self.current_ms) for prop in self.selected.keyframes
-                if any(frame.time_ms == self.current_ms for frame in self.selected.keyframes[prop])
-            }
-            self.status = f"Keyframe at {self.current_ms} ms"
+        elif action == "keyframe":
+            layer = self.project.layers[self.active_layer]
+            if layer.is_canvas:
+                value = bool(layer.value_at("canvas_enabled", self.current_ms))
+                layer.add_keyframe("canvas_enabled", self.current_ms, value)
+                self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
+                self.timeline_expanded_layers.add(layer.id)
+                self.status = f"Canvas keyframe at {self.current_ms} ms"
+            elif self.selected:
+                state = self.selected.state_at(self.current_ms)
+                for prop in (
+                    "x", "y", "width", "height", "rotation", "rotation_turns", "color", "opacity",
+                    "feather", "mask_expansion",
+                    "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
+                    "gradient_angle", "visible",
+                ):
+                    self.selected.add_keyframe(prop, self.current_ms, state[prop])
+                self.selected_keyframes = {
+                    (self.selected.id, prop, self.current_ms) for prop in self.selected.keyframes
+                    if any(frame.time_ms == self.current_ms for frame in self.selected.keyframes[prop])
+                }
+                self.status = f"Keyframe at {self.current_ms} ms"
         elif action == "stencil":
             self.stencil = not self.stencil
             if self.stencil:
@@ -742,6 +785,11 @@ class Editor:
             self.drag_mode = None
             self.status = "Gradient changes applied"
         elif action == "random_led_editor":
+            if self.project.layers[self.active_layer].is_canvas:
+                self.status = "Select a regular layer before adding a Random LED effect"
+                if mutating:
+                    self._commit_change()
+                return
             effect = self._active_random_led_effect()
             if effect is None:
                 self._begin_change()
@@ -831,7 +879,7 @@ class Editor:
         elif action == "toggle_overlay":
             self.project.overlay = not self.project.overlay
             self.status = (
-                "Export mode: CANVAS/OVERLAY — black cells are transparent"
+                "Export mode: CANVAS/OVERLAY — empty cells use the transparent FF00FF sentinel"
                 if self.project.overlay else
                 "Export mode: FULL — black cells overwrite the playfield"
             )
@@ -982,7 +1030,7 @@ class Editor:
             layer_index = next(
                 (
                     index for index, layer in enumerate(self.project.layers)
-                    if target in [*layer.shapes, *layer.effects]
+                    if target is layer or target in [*layer.shapes, *layer.effects]
                 ),
                 None,
             )
@@ -991,6 +1039,9 @@ class Editor:
                 self.gradient_editor_open = False
                 if isinstance(target, Shape):
                     self.selected = target
+                    self.random_led_editor_open = False
+                elif isinstance(target, Layer):
+                    self.selected = None
                     self.random_led_editor_open = False
                 else:
                     self.selected = None
@@ -1010,17 +1061,29 @@ class Editor:
             layer = self.project.layers[self.active_layer]
             if self.selected not in layer.shapes:
                 self.selected = layer.shapes[-1] if layer.shapes else None
+            if layer.is_canvas:
+                self.random_led_editor_open = False
             self.selected_keyframes.clear()
             self.status = f"Active layer: {layer.name}"
             self._ensure_active_layer_visible()
         elif action.startswith("toggle_layer:"):
             index = int(action.split(":")[1])
             layer = self.project.layers[index]
-            layer.visible = not layer.visible
-            if not layer.visible and self.selected in layer.shapes:
+            if layer.is_canvas:
+                self.active_layer = index
+                enabled = not bool(layer.value_at("canvas_enabled", self.current_ms))
+                layer.add_keyframe("canvas_enabled", self.current_ms, enabled)
                 self.selected = None
-                self.selected_keyframes.clear()
-            self.status = f"Layer {layer.name}: {'ON' if layer.visible else 'OFF'}"
+                self.random_led_editor_open = False
+                self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
+                self.timeline_expanded_layers.add(layer.id)
+                self.status = f"Canvas: {'transparent' if enabled else 'blackout'} from {self.current_ms} ms"
+            else:
+                layer.visible = not layer.visible
+                if not layer.visible and self.selected in layer.shapes:
+                    self.selected = None
+                    self.selected_keyframes.clear()
+                self.status = f"Layer {layer.name}: {'ON' if layer.visible else 'OFF'}"
         if mutating:
             self._commit_change()
 
@@ -1072,6 +1135,9 @@ class Editor:
     def _create_shape(
         self, kind: str, point: tuple[float, float], history: bool = True
     ) -> None:
+        if self.project.layers[self.active_layer].is_canvas:
+            self.status = "Select a regular layer before adding a shape"
+            return
         if history:
             self._begin_change()
         x, y = point
@@ -1191,7 +1257,7 @@ class Editor:
             rows.append(TimelineRow("layer", layer_index))
             if layer.id not in self.timeline_expanded_layers:
                 continue
-            for target in [*layer.shapes, *layer.effects]:
+            for target in self._layer_keyframe_targets(layer):
                 props = sorted(
                     (prop for prop, frames in target.keyframes.items() if frames),
                     key=lambda prop: (property_order.get(prop, len(property_order)), prop),
@@ -1202,7 +1268,11 @@ class Editor:
                 )
         return rows
 
-    def _timeline_row_target(self, row: TimelineRow) -> Shape | RandomLedEffect | None:
+    @staticmethod
+    def _layer_keyframe_targets(layer: Layer) -> list[Layer | Shape | RandomLedEffect]:
+        return [layer] if layer.is_canvas else [*layer.shapes, *layer.effects]
+
+    def _timeline_row_target(self, row: TimelineRow) -> Layer | Shape | RandomLedEffect | None:
         return self._find_keyframe_target(row.target_id) if row.target_id else None
 
     def _choose_graph_channel(self) -> bool:
@@ -1709,7 +1779,7 @@ class Editor:
         layer = self.project.layers[row.layer_index]
         return {
             (target.id, prop, time_ms)
-            for target in [*layer.shapes, *layer.effects]
+            for target in self._layer_keyframe_targets(layer)
             for prop, frames in target.keyframes.items()
             if any(frame.time_ms == time_ms for frame in frames)
         }
@@ -1723,7 +1793,7 @@ class Editor:
         layer = self.project.layers[row.layer_index]
         return {
             frame.time_ms
-            for target in [*layer.shapes, *layer.effects]
+            for target in self._layer_keyframe_targets(layer)
             for frames in target.keyframes.values()
             for frame in frames
         }
@@ -1757,7 +1827,9 @@ class Editor:
         return next(iter(keys))[2] if keys else None
 
     def _selected_timeline_row_y(self, timeline: pygame.Rect) -> int | None:
-        if self.random_led_editor_open and self._active_random_led_effect():
+        if self.project.layers[self.active_layer].is_canvas:
+            layer_index = self.active_layer
+        elif self.random_led_editor_open and self._active_random_led_effect():
             layer_index = self.active_layer
         elif self.selected:
             layer_index = next(
@@ -1780,7 +1852,7 @@ class Editor:
     def _inactive_layer_keyframe_times(layer: Layer, active_target) -> set[int]:
         return {
             frame.time_ms
-            for item in [*layer.shapes, *layer.effects]
+            for item in Editor._layer_keyframe_targets(layer)
             if item is not active_target
             for frames in item.keyframes.values()
             for frame in frames
@@ -1845,7 +1917,7 @@ class Editor:
         if not selected_times:
             return
         delta = max(-min(selected_times), min(self.project.duration_ms - max(selected_times), delta))
-        records: list[tuple[str, str, int, Shape | RandomLedEffect, object]] = []
+        records: list[tuple[str, str, int, Layer | Shape | RandomLedEffect, object]] = []
         for target_id, prop, old_time in keys:
             target = self._find_keyframe_target(target_id)
             if not target:
@@ -2104,14 +2176,17 @@ class Editor:
         effects = self.project.layers[self.active_layer].effects
         return effects[0] if effects else None
 
-    def _active_keyframe_target(self) -> Shape | RandomLedEffect | None:
+    def _active_keyframe_target(self) -> Layer | Shape | RandomLedEffect | None:
+        layer = self.project.layers[self.active_layer]
+        if layer.is_canvas:
+            return layer
         if self.random_led_editor_open:
             return self._active_random_led_effect()
         return self.selected
 
-    def _find_keyframe_target(self, target_id: str) -> Shape | RandomLedEffect | None:
+    def _find_keyframe_target(self, target_id: str) -> Layer | Shape | RandomLedEffect | None:
         for layer in self.project.layers:
-            for target in [*layer.shapes, *layer.effects]:
+            for target in [layer, *layer.shapes, *layer.effects]:
                 if target.id == target_id:
                     return target
         return None
@@ -3181,7 +3256,10 @@ class Editor:
     def _preview_led_colors(self) -> list[tuple[int, int, int]]:
         effect = self._active_imported_effect()
         if effect:
-            firmware_colors = effect.colors_at(self.current_ms)
+            firmware_colors = [
+                (0, 0, 0) if effect.overlay and color == TRANSPARENT_SENTINEL else color
+                for color in effect.colors_at(self.current_ms)
+            ]
         else:
             slots = self.led_map.export_slots()
             active_colors = iter(render_leds(
@@ -3446,18 +3524,22 @@ class Editor:
             row_rect = pygame.Rect(rect.x, row_y - 11, rect.width, 31)
             if timeline_row.kind == "layer":
                 expanded = layer.id in self.timeline_expanded_layers
+                layer_on = (
+                    bool(layer.value_at("canvas_enabled", self.current_ms))
+                    if layer.is_canvas else layer.visible
+                )
                 if active_layer:
                     pygame.draw.rect(self.screen, (42, 54, 76), row_rect)
                     pygame.draw.rect(self.screen, ACCENT, (row_rect.x, row_rect.y, 3, row_rect.height))
                 self._button(
                     pygame.Rect(rect.x + 7, row_rect.y + 5, 37, 21),
-                    f"toggle_layer:{index}", "ON" if layer.visible else "OFF", layer.visible,
+                    f"toggle_layer:{index}", "ON" if layer_on else "OFF", layer_on,
                 )
                 self._button(
                     pygame.Rect(rect.x + 48, row_rect.y + 5, 22, 21),
                     f"toggle_timeline_layer:{index}", "v" if expanded else ">", expanded,
                 )
-                layer_text = layer.name
+                layer_text = f"C {layer.name}" if layer.is_canvas else layer.name
                 while len(layer_text) > 5 and self.small.size(layer_text)[0] > 102:
                     layer_text = layer_text[:-4] + "..."
                 label = self.small.render(
@@ -3479,6 +3561,8 @@ class Editor:
                 target_active = target is self.selected or (
                     isinstance(target, RandomLedEffect)
                     and self.random_led_editor_open and index == self.active_layer
+                ) or (
+                    isinstance(target, Layer) and target.is_canvas and index == self.active_layer
                 )
                 if target_active:
                     pygame.draw.rect(self.screen, (35, 43, 58), row_rect)
@@ -3626,6 +3710,7 @@ class Editor:
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 12
         self.screen.blit(self.font.render("Layers", True, (218, 222, 232)), (x, y))
+        self._button(pygame.Rect(panel.right - 190, y - 3, 34, 25), "canvas_layer", "C+", False)
         self._button(pygame.Rect(panel.right - 150, y - 3, 34, 25), "random_led_editor", "FX", False)
         self._button(pygame.Rect(panel.right - 110, y - 3, 28, 25), "duplicate_layer", "D", False)
         self._button(pygame.Rect(panel.right - 76, y - 3, 28, 25), "delete_layer", "−", False)
@@ -3637,8 +3722,14 @@ class Editor:
                 pygame.draw.rect(self.screen, (47, 61, 85), row, border_radius=3)
                 pygame.draw.rect(self.screen, ACCENT, (row.x, row.y, 3, row.height))
             eye = pygame.Rect(row.x + 5, row.y + 3, 24, 21)
-            self._button(eye, f"toggle_layer:{index}", "●" if layer.visible else "○", False)
-            name = self.small.render(f"≡   {layer.name}", True, (228, 232, 241))
+            layer_on = (
+                bool(layer.value_at("canvas_enabled", self.current_ms))
+                if layer.is_canvas else layer.visible
+            )
+            self._button(eye, f"toggle_layer:{index}", "●" if layer_on else "○", False)
+            prefix = "C" if layer.is_canvas else "≡"
+            name_color = (105, 218, 224) if layer.is_canvas else (228, 232, 241)
+            name = self.small.render(f"{prefix}   {layer.name}", True, name_color)
             self.screen.blit(name, (row.x + 38, row.y + 6))
             self.buttons.append((pygame.Rect(row.x + 34, row.y, row.width - 34, row.height), f"drag_layer:{index}", layer.name))
             y += 31

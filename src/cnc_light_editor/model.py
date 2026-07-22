@@ -121,7 +121,24 @@ class Layer:
     visible: bool = True
     shapes: list[Shape] = field(default_factory=list)
     effects: list[RandomLedEffect] = field(default_factory=list)
+    is_canvas: bool = False
+    canvas_enabled: bool = True
     id: str = field(default_factory=lambda: uuid4().hex[:10])
+    keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
+
+    def add_keyframe(self, prop: str, time_ms: int, value: Any) -> None:
+        frames = self.keyframes.setdefault(prop, [])
+        frames[:] = [frame for frame in frames if frame.time_ms != time_ms]
+        frames.append(Keyframe(int(time_ms), value))
+        frames.sort(key=lambda frame: frame.time_ms)
+
+    def value_at(self, prop: str, time_ms: int) -> Any:
+        value = getattr(self, prop)
+        for frame in self.keyframes.get(prop, []):
+            if frame.time_ms > time_ms:
+                break
+            value = frame.value
+        return value
 
 
 @dataclass
@@ -168,6 +185,17 @@ class Project:
         steps = loop_frames * max(1, self.loops) + self.stored_frame_count - loop_frames
         return steps * max(1, self.frame_ms or 1)
 
+    def canvas_transparency_at(self, time_ms: int) -> bool:
+        if not self.overlay:
+            return False
+        canvas_layers = [layer for layer in self.layers if layer.is_canvas]
+        if not canvas_layers:
+            return True
+        return any(
+            layer.visible and bool(layer.value_at("canvas_enabled", time_ms))
+            for layer in canvas_layers
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -183,6 +211,10 @@ class Project:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         layers: list[Layer] = []
         for layer_raw in raw.pop("layers", []):
+            layer_keyframes = {
+                prop: [Keyframe(**frame) for frame in frames]
+                for prop, frames in layer_raw.pop("keyframes", {}).items()
+            }
             shapes: list[Shape] = []
             for shape_raw in layer_raw.pop("shapes", []):
                 keyframes = {
@@ -215,7 +247,9 @@ class Project:
                 if "color" in effect_raw:
                     effect_raw["color"] = tuple(effect_raw["color"])
                 effects.append(RandomLedEffect(**effect_raw, keyframes=keyframes))
-            layers.append(Layer(**layer_raw, shapes=shapes, effects=effects))
+            layers.append(Layer(
+                **layer_raw, shapes=shapes, effects=effects, keyframes=layer_keyframes,
+            ))
         return cls(**raw, layers=layers or [Layer("Layer 1")])
 
 

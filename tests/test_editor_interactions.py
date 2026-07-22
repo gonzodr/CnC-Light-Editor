@@ -23,6 +23,70 @@ def make_editor() -> Editor:
     return editor
 
 
+def test_canvas_layer_is_unique_undoable_and_owns_a_timeline_channel():
+    editor = make_editor()
+
+    editor._action("canvas_layer")
+
+    canvas_layer = editor.project.layers[-1]
+    assert canvas_layer.is_canvas is True
+    assert editor.project.overlay is True
+    assert editor.active_layer == len(editor.project.layers) - 1
+    assert canvas_layer.value_at("canvas_enabled", 0) is True
+    assert (canvas_layer.id, "canvas_enabled", 0) in editor.selected_keyframes
+    assert any(
+        row.kind == "property"
+        and row.target_id == canvas_layer.id
+        and row.prop == "canvas_enabled"
+        for row in editor._timeline_rows()
+    )
+
+    editor._action("canvas_layer")
+    assert sum(layer.is_canvas for layer in editor.project.layers) == 1
+
+    editor._undo()
+    assert not any(layer.is_canvas for layer in editor.project.layers)
+
+
+def test_canvas_timeline_toggle_creates_stepped_on_off_keyframe():
+    editor = make_editor()
+    editor._action("canvas_layer")
+    canvas_layer = editor.project.layers[-1]
+    editor.current_ms = 500
+
+    editor._action(f"toggle_layer:{editor.active_layer}")
+
+    assert canvas_layer.value_at("canvas_enabled", 499) is True
+    assert canvas_layer.value_at("canvas_enabled", 500) is False
+    assert editor.selected_keyframes == {(canvas_layer.id, "canvas_enabled", 500)}
+    assert editor.project.canvas_transparency_at(499) is True
+    assert editor.project.canvas_transparency_at(500) is False
+
+
+def test_shapes_and_random_led_effects_cannot_be_added_to_canvas_layer():
+    editor = make_editor()
+    editor._action("canvas_layer")
+    canvas_layer = editor.project.layers[-1]
+
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor._action("random_led_editor")
+
+    assert canvas_layer.shapes == []
+    assert canvas_layer.effects == []
+
+
+def test_imported_overlay_sentinel_is_transparent_in_led_preview():
+    editor = make_editor()
+    editor.imported_effects = [ImportedEffect(
+        "overlay",
+        [[(255, 0, 255)] * EFFECT_LEDS],
+        overlay=True,
+    )]
+    editor.active_import_index = 0
+
+    assert set(editor._preview_led_colors()) == {(0, 0, 0)}
+
+
 def test_drag_created_shape_can_be_undone_and_redone():
     editor = make_editor()
     editor._create_shape("rectangle", (0.25, 0.4))

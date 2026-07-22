@@ -99,3 +99,39 @@ def test_effect_bank_rejects_duplicate_ids_and_capacity_overflow(tmp_path):
     too_large = [ImportedEffect("Large", black_frame * 3, effect_id=5)]
     with pytest.raises(ValueError, match="exceeding"):
         export_effect_bank(too_large, tmp_path / "large.h", max_bytes=500)
+
+
+def test_overlay_canvas_layer_switches_empty_cells_between_black_and_sentinel(tmp_path):
+    canvas = Layer("Canvas", is_canvas=True, canvas_enabled=False)
+    canvas.add_keyframe("canvas_enabled", 0, False)
+    canvas.add_keyframe("canvas_enabled", 50, True)
+    project = Project(
+        "dynamic canvas", duration_ms=100, frame_ms=50, overlay=True,
+        layers=[Layer("art"), canvas],
+    )
+
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "canvas.h")
+    frames = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames
+
+    assert frames[0][0] == (0, 0, 0)
+    assert frames[1][0] == (255, 0, 255)
+
+
+def test_overlay_export_preserves_opaque_black_and_avoids_real_magenta_collision(tmp_path):
+    black = Shape("rectangle", "black", x=0.25, width=0.2, height=1.0, color=(0, 0, 0))
+    magenta = Shape("rectangle", "magenta", x=0.75, width=0.2, height=1.0, color=(255, 0, 255))
+    project = Project(
+        "sentinel safety", duration_ms=50, frame_ms=50, overlay=True,
+        layers=[Layer("paint", shapes=[black, magenta])],
+    )
+
+    path = export_arduino_header(
+        project, [(0.25, 0.5), (0.5, 0.5), (0.75, 0.5), None],
+        tmp_path / "sentinel.h",
+    )
+    frame = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames[0]
+
+    assert frame[0] == (0, 0, 0)
+    assert frame[1] == (255, 0, 255)
+    assert frame[2] == (254, 0, 255)
+    assert frame[3] == (0, 0, 0)
