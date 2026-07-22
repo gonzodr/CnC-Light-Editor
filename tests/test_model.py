@@ -81,6 +81,23 @@ def test_hidden_layer_does_not_reach_led():
     assert render_leds(project, [(0.5, 0.5)], 0) == [(0, 0, 0)]
 
 
+def test_layer_opacity_dims_the_composited_layer_and_round_trips(tmp_path):
+    shape = Shape(
+        "rectangle", "layer faded", width=1.0, height=1.0,
+        color=(200, 100, 40),
+    )
+    layer = Layer("faded", opacity=0.25, locked=True, shapes=[shape])
+    project = Project(layers=[layer])
+
+    assert render_leds(project, [(0.5, 0.5)], 0) == [(50, 25, 10)]
+
+    path = tmp_path / "layer-properties.cnclight"
+    project.save(path)
+    restored = Project.load(path).layers[0]
+    assert restored.opacity == 0.25
+    assert restored.locked is True
+
+
 def test_easing_changes_interpolation_curve():
     shape = Shape("ellipse", "ease", x=0.0)
     shape.add_keyframe("x", 0, 0.0)

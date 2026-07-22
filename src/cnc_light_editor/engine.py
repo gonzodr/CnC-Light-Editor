@@ -67,6 +67,9 @@ def render_leds_with_mask(
     for layer in project.layers:
         if not layer.visible or layer.is_canvas:
             continue
+        layer_opacity = max(0.0, min(1.0, float(layer.opacity)))
+        if layer_opacity <= 0.0:
+            continue
         shape_states = [(shape, shape.state_at(time_ms)) for shape in layer.shapes]
         random_led_overlays = _random_led_overlays(layer, points, time_ms)
         for point_index, point in enumerate(points):
@@ -77,13 +80,18 @@ def render_leds_with_mask(
                 coverage = shape_coverage(shape, state, point)
                 if coverage <= 0.0:
                     continue
-                alpha = max(0.0, min(1.0, float(state["opacity"]))) * coverage
+                alpha = (
+                    max(0.0, min(1.0, float(state["opacity"])))
+                    * coverage
+                    * layer_opacity
+                )
                 if alpha <= 0.0:
                     continue
                 src = gradient_color(state, point)
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
                 painted[point_index] = True
             for src, alpha in random_led_overlays[point_index]:
+                alpha *= layer_opacity
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
                 if alpha > 0.0:
                     painted[point_index] = True

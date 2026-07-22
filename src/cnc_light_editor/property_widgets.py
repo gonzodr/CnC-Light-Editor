@@ -71,6 +71,14 @@ SHAPE_PROPERTY_SPECS = {
 }
 
 
+LAYER_PROPERTY_SPECS = {
+    "layer_opacity": NumericPropertySpec(
+        "layer_opacity", "Layer opacity", 0.0, 1.0, 0.005,
+        1, 100.0, "%",
+    ),
+}
+
+
 RANDOM_LED_PROPERTY_SPECS = {
     spec.key: spec for spec in (
         NumericPropertySpec("seed", "Random seed", 0.0, 2147483647.0, 1.0, 0, integer=True),

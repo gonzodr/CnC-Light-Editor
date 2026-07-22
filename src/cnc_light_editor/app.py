@@ -22,6 +22,7 @@ from .exporter import (
 from .ledmap import Led, LedMap
 from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
 from .property_widgets import (
+    LAYER_PROPERTY_SPECS,
     NumericPropertySpec,
     RANDOM_LED_PROPERTY_SPECS,
     SHAPE_PROPERTY_SPECS,
@@ -71,6 +72,7 @@ HELP_COLUMNS = (
         ("LAYERS / CANVAS", (
             ("Ctrl + D", "Duplicate active layer"),
             ("F2 / layer R", "Rename active layer"),
+            ("Layer L", "Lock or unlock layer editing"),
             ("C+ button", "Add the keyframeable Canvas layer"),
             ("Layer ON/OFF", "Toggle layer; Canvas creates a keyframe"),
             ("Enable / Disable", "Write an explicit Canvas state key"),
@@ -120,6 +122,7 @@ TIMELINE_PROPERTY_LABELS = {
     "gradient_angle": "Gradient angle", "visible": "Visibility",
     "enabled": "Enabled",
     "canvas_enabled": "Canvas enabled",
+    "layer_opacity": "Layer opacity",
 }
 GRAPH_NUMERIC_PROPERTIES = {
     "x", "y", "width", "height", "rotation", "rotation_turns", "opacity",
@@ -458,8 +461,11 @@ class Editor:
             for rect, action, _ in reversed(self.buttons):
                 if rect.collidepoint(event.pos):
                     if action.startswith("add:"):
-                        self.tool_drag = action.split(":", 1)[1]
-                        self.drag_origin = event.pos
+                        if self.project.layers[self.active_layer].locked:
+                            self.status = f"Layer {self.project.layers[self.active_layer].name} is locked"
+                        else:
+                            self.tool_drag = action.split(":", 1)[1]
+                            self.drag_origin = event.pos
                     elif action.startswith("drag_layer:"):
                         layer_index = int(action.split(":")[1])
                         if getattr(event, "clicks", 1) >= 2:
@@ -488,6 +494,14 @@ class Editor:
                             self.drag_mode = "timeline_resize"
                             self.drag_origin = event.pos
                             self.status = "Drag to resize the timeline"
+                    elif action == "scrub:layer_opacity":
+                        layer = self.project.layers[self.active_layer]
+                        self.scrub_prop = "layer_opacity"
+                        self.property_editing = None
+                        self.drag_mode = "layer_opacity_scrub"
+                        self.drag_origin = event.pos
+                        self.drag_shape_state = {"layer_opacity": layer.opacity}
+                        self._begin_change()
                     elif action.startswith("scrub:") and self.selected:
                         self.scrub_prop = action.split(":", 1)[1]
                         self.property_editing = None
@@ -648,6 +662,10 @@ class Editor:
                     and self.scrub_prop is not None
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
+                open_layer_opacity_input = (
+                    self.drag_mode == "layer_opacity_scrub"
+                    and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
+                )
                 if not self.duration_editing:
                     self._commit_change()
                 if open_stroke_input and self.selected:
@@ -663,6 +681,14 @@ class Editor:
                     self.status = f"Type {TIMELINE_PROPERTY_LABELS[prop]}, then press Enter"
                 elif open_random_effect_input and self.scrub_prop:
                     self._open_random_effect_input(self.scrub_prop)
+                elif open_layer_opacity_input:
+                    layer = self.project.layers[self.active_layer]
+                    self.property_editing = "layer_opacity"
+                    self.property_input = LAYER_PROPERTY_SPECS["layer_opacity"].input_text(
+                        layer.opacity
+                    )
+                    self.property_input_select_all = True
+                    self.status = "Type layer opacity, then press Enter"
                 self.drag_mode = None
                 self.scrub_prop = None
                 self.drag_key_time = None
@@ -695,6 +721,8 @@ class Editor:
                 self._scrub_property(event.pos[0])
             elif self.drag_mode == "random_led_scrub":
                 self._scrub_random_effect_parameter(event.pos[0])
+            elif self.drag_mode == "layer_opacity_scrub":
+                self._scrub_layer_opacity(event.pos[0])
             elif self.drag_mode == "gradient_stop":
                 self._move_gradient_stop(event.pos[0])
             elif self.drag_mode == "gradient_angle":
@@ -851,10 +879,16 @@ class Editor:
             self._commit_change()
 
     def _action(self, action: str) -> None:
+        if self._action_requires_unlocked_layer(action):
+            layer = self.project.layers[self.active_layer]
+            if layer.locked:
+                self.status = f"Layer {layer.name} is locked"
+                return
         mutating = (
             action.startswith((
                 "add:", "color:", "fill_mode:", "gradient_type:",
-                "gradient_radial_mode:", "toggle_layer:", "canvas_state:",
+                "gradient_radial_mode:", "toggle_layer:", "toggle_layer_lock:",
+                "canvas_state:",
             ))
             or action in {
                 "layer", "canvas_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
@@ -1351,8 +1385,37 @@ class Editor:
                     self.selected = None
                     self.selected_keyframes.clear()
                 self.status = f"Layer {layer.name}: {'ON' if layer.visible else 'OFF'}"
+        elif action.startswith("toggle_layer_lock:"):
+            index = int(action.split(":", 1)[1])
+            layer = self.project.layers[index]
+            layer.locked = not layer.locked
+            self.active_layer = index
+            self.timeline_selected_layer_id = layer.id
+            if layer.locked:
+                if self.selected in layer.shapes:
+                    self.selected = None
+                target_ids = {layer.id, *(shape.id for shape in layer.shapes), *(effect.id for effect in layer.effects)}
+                self.selected_keyframes = {
+                    key for key in self.selected_keyframes if key[0] not in target_ids
+                }
+                self.random_led_editor_open = False
+            self.status = f"Layer {layer.name}: {'LOCKED' if layer.locked else 'UNLOCKED'}"
         if mutating:
             self._commit_change()
+
+    @staticmethod
+    def _action_requires_unlocked_layer(action: str) -> bool:
+        if action.startswith((
+            "add:", "color:", "fill_mode:", "gradient_type:",
+            "gradient_radial_mode:", "canvas_state:",
+        )):
+            return True
+        return action in {
+            "delete_layer", "delete", "duplicate", "keyframe",
+            "gradient_editor", "gradient_add_stop", "gradient_delete_stop",
+            "random_led_editor", "random_led_toggle", "random_led_keyframe",
+            "random_led_opacity_keyframe", "random_led_delete",
+        }
 
     def _begin_change(self) -> None:
         if self.change_snapshot is None:
@@ -1375,10 +1438,17 @@ class Editor:
         self.active_layer = min(self.active_layer, len(self.project.layers) - 1)
         self._ensure_active_layer_visible()
         self.selected = next(
-            (shape for layer in self.project.layers for shape in layer.shapes if shape.id == selected_id),
+            (
+                shape for layer in self.project.layers if not layer.locked
+                for shape in layer.shapes if shape.id == selected_id
+            ),
             None,
         )
-        if self.selected is None and self.project.layers[self.active_layer].shapes:
+        if (
+            self.selected is None
+            and not self.project.layers[self.active_layer].locked
+            and self.project.layers[self.active_layer].shapes
+        ):
             self.selected = self.project.layers[self.active_layer].shapes[-1]
         self.selected_keyframes.clear()
         self.timeline_selected_layer_id = None
@@ -1403,7 +1473,11 @@ class Editor:
     def _create_shape(
         self, kind: str, point: tuple[float, float], history: bool = True
     ) -> None:
-        if self.project.layers[self.active_layer].is_canvas:
+        active_layer = self.project.layers[self.active_layer]
+        if active_layer.locked:
+            self.status = f"Layer {active_layer.name} is locked"
+            return
+        if active_layer.is_canvas:
             self.status = "Select a regular layer before adding a shape"
             return
         if history:
@@ -1477,7 +1551,10 @@ class Editor:
     def _transform_selection(
         self, pos: tuple[int, int], canvas: pygame.Rect
     ) -> None:
-        if not self.selected or not self.drag_shape_state:
+        if (
+            not self.selected or not self.drag_shape_state
+            or self._target_is_locked(self.selected.id)
+        ):
             return
         state = self.drag_shape_state
         if self.drag_mode == "move":
@@ -1733,6 +1810,9 @@ class Editor:
         channel = self._graph_channel()
         if not channel:
             return
+        if self._target_is_locked(handle[0]):
+            self.status = "Unlock the layer before editing its easing curve"
+            return
         self.graph_drag_handle = handle
         self.graph_drag_value_range = self._graph_value_range(*channel)
         self.drag_mode = "bezier_handle"
@@ -1787,6 +1867,9 @@ class Editor:
         if not channel or not keys:
             return
         target, prop = channel
+        if self._target_is_locked(target.id):
+            self.status = "Unlock the layer before moving its keyframes"
+            return
         clicked_time = next(iter(keys))[2]
         selected_channel = {
             key for key in self.selected_keyframes
@@ -2187,6 +2270,9 @@ class Editor:
     def _move_keyframe(self, screen_x: int, timeline: pygame.Rect) -> None:
         if self.drag_key_time is None:
             return
+        if self._selection_contains_locked_keyframes():
+            self.status = "Unlock the layer before moving its keyframes"
+            return
         new_time = self._timeline_x_to_time(screen_x, timeline)
         start, end = self._timeline_window()
         if self.snap or self._timeline_uses_frame_ruler(timeline, end - start):
@@ -2235,6 +2321,9 @@ class Editor:
 
     def _delete_selected_keyframes(self) -> None:
         if not self.selected_keyframes:
+            return
+        if self._selection_contains_locked_keyframes():
+            self.status = "Unlock the layer before deleting its keyframes"
             return
         self._begin_change()
         grouped: dict[tuple[str, str], set[int]] = {}
@@ -2295,6 +2384,9 @@ class Editor:
         if not records:
             self.status = "Copied keyframe targets no longer exist"
             return
+        if any(self._target_is_locked(target_id) for _target, target_id, *_rest in records):
+            self.status = "Unlock the target layer before pasting keyframes"
+            return
         last_time = self.current_ms + max(record[3] for record in records)
         if last_time > 15000:
             self.status = "Paste would exceed the 15 second timeline limit"
@@ -2324,6 +2416,9 @@ class Editor:
         self.status = f"Pasted {len(pasted)} keyframe{'s' if len(pasted) != 1 else ''} at playhead"
 
     def _apply_keyframe_context(self, action: str) -> None:
+        if self._selection_contains_locked_keyframes():
+            self.status = "Unlock the layer before editing its keyframes"
+            return
         if action == "delete":
             self._delete_selected_keyframes()
             return
@@ -2470,6 +2565,15 @@ class Editor:
             value = round(value / step) * step
         self._set_animated(prop, value)
 
+    def _scrub_layer_opacity(self, screen_x: int) -> None:
+        if not self.drag_shape_state:
+            return
+        spec = LAYER_PROPERTY_SPECS["layer_opacity"]
+        start = float(self.drag_shape_state["layer_opacity"])
+        value = spec.normalize(start + (screen_x - self.drag_origin[0]) * spec.sensitivity)
+        self.project.layers[self.active_layer].opacity = float(value)
+        self.status = f"Layer opacity: {spec.display_text(value)}"
+
     @staticmethod
     def _random_effect_parameter_value(
         effect: RandomLedEffect, prop: str, time_ms: int | None = None,
@@ -2557,7 +2661,7 @@ class Editor:
 
     def _pick(self, point: tuple[float, float]) -> Shape | None:
         for layer in reversed(self.project.layers):
-            if not layer.visible:
+            if not layer.visible or layer.locked:
                 continue
             for shape in reversed(layer.shapes):
                 state = shape.state_at(self.current_ms)
@@ -2597,6 +2701,24 @@ class Editor:
                 if target.id == target_id:
                     return target
         return None
+
+    def _layer_for_target_id(self, target_id: str) -> Layer | None:
+        for layer in self.project.layers:
+            if layer.id == target_id:
+                return layer
+            if any(target.id == target_id for target in [*layer.shapes, *layer.effects]):
+                return layer
+        return None
+
+    def _target_is_locked(self, target_id: str) -> bool:
+        layer = self._layer_for_target_id(target_id)
+        return bool(layer and layer.locked)
+
+    def _selection_contains_locked_keyframes(self) -> bool:
+        return any(
+            self._target_is_locked(target_id)
+            for target_id, _prop, _time_ms in self.selected_keyframes
+        )
 
     def _playback_duration(self) -> int:
         effect = self._active_imported_effect()
@@ -3510,13 +3632,15 @@ class Editor:
 
     def _handle_property_input(self, event: pygame.event.Event) -> None:
         prop = self.property_editing
-        if not prop or not self.selected:
+        layer_property = prop == "layer_opacity"
+        if not prop or (not layer_property and not self.selected):
             self.property_editing = None
             return
+        label = TIMELINE_PROPERTY_LABELS[prop]
         ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
         if ctrl and event.key == pygame.K_a:
             self.property_input_select_all = True
-            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} value selected"
+            self.status = f"{label} value selected"
             return
         if ctrl and event.key == pygame.K_v:
             pasted = self._clipboard_text().strip().replace(",", ".")
@@ -3529,22 +3653,27 @@ class Editor:
                 self.property_input + pasted
             )[:12]
             self.property_input_select_all = False
-            self.status = f"Pasted {TIMELINE_PROPERTY_LABELS[prop]} — press Enter"
+            self.status = f"Pasted {label} — press Enter"
             return
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
             try:
                 entered = float(self.property_input.replace(",", "."))
             except ValueError:
-                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be a number"
+                self.status = f"{label} must be a number"
                 return
-            spec = SHAPE_PROPERTY_SPECS[prop]
+            spec = (
+                LAYER_PROPERTY_SPECS[prop]
+                if layer_property else SHAPE_PROPERTY_SPECS[prop]
+            )
             low, high = spec.input_limits()
             if (low is not None and entered < low) or (high is not None and entered > high):
-                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} must be {low:g}–{high:g}"
+                self.status = f"{label} must be {low:g}–{high:g}"
                 return
             value = spec.from_input(entered)
             self._begin_change()
-            if prop == "rotation":
+            if layer_property:
+                self.project.layers[self.active_layer].opacity = float(value)
+            elif prop == "rotation":
                 state = self.selected.state_at(self.current_ms)
                 added_turns = math.floor(value / 360.0)
                 angle = value - added_turns * 360.0
@@ -3561,16 +3690,18 @@ class Editor:
             self._commit_change()
             self.property_editing = None
             self.property_input_select_all = False
-            if prop in {"rotation", "rotation_turns"}:
+            if layer_property:
+                self.status = f"Layer opacity: {spec.display_text(value)}"
+            elif prop in {"rotation", "rotation_turns"}:
                 state = self.selected.state_at(self.current_ms)
                 self.status = f"Rotation: {state['rotation']:.1f}° ×{state['rotation_turns']:.0f}"
             else:
-                self.status = f"{TIMELINE_PROPERTY_LABELS[prop]}: {spec.display_text(value)}"
+                self.status = f"{label}: {spec.display_text(value)}"
             return
         if event.key == pygame.K_ESCAPE:
             self.property_editing = None
             self.property_input_select_all = False
-            self.status = f"{TIMELINE_PROPERTY_LABELS[prop]} edit cancelled"
+            self.status = f"{label} edit cancelled"
             return
         if event.key == pygame.K_BACKSPACE:
             if self.property_input_select_all:
@@ -3749,8 +3880,9 @@ class Editor:
 
     def _draw_shapes(self, canvas: pygame.Rect) -> None:
         for layer in self.project.layers:
-            if not layer.visible:
+            if not layer.visible or layer.opacity <= 0.0:
                 continue
+            layer_opacity = max(0.0, min(1.0, float(layer.opacity)))
             for shape in layer.shapes:
                 state = shape.state_at(self.current_ms)
                 if not state["visible"]:
@@ -3776,11 +3908,12 @@ class Editor:
                     paint = self._gradient_surface(
                         surface.get_size(), state["gradient_stops"], state["gradient_type"],
                         state.get("gradient_radial_mode", "radius"),
-                        float(state.get("gradient_angle", 0.0)), int(220 * state["opacity"]),
+                        float(state.get("gradient_angle", 0.0)),
+                        int(220 * state["opacity"] * layer_opacity),
                     )
                 else:
                     paint = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-                    paint.fill((*state["color"], int(220 * state["opacity"])))
+                    paint.fill((*state["color"], int(220 * state["opacity"] * layer_opacity)))
                 paint.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
                 surface.blit(paint, (0, 0))
                 rotated = pygame.transform.rotate(surface, -state["rotation_total"])
@@ -3886,6 +4019,7 @@ class Editor:
         )
         if (
             not geometry or self.calibration or not layer or not layer.visible
+            or layer.locked
             or not self.selected.state_at(self.current_ms)["visible"]
         ):
             return
@@ -4215,17 +4349,23 @@ class Editor:
                 )
                 self._button(
                     pygame.Rect(rect.x + 48, row_rect.y + 5, 22, 21),
+                    f"toggle_layer_lock:{index}", "L", layer.locked,
+                )
+                self._button(
+                    pygame.Rect(rect.x + 73, row_rect.y + 5, 22, 21),
                     f"toggle_timeline_layer:{index}", "v" if expanded else ">", expanded,
                 )
                 layer_text = f"C {layer.name}" if layer.is_canvas else layer.name
-                while len(layer_text) > 5 and self.small.size(layer_text)[0] > 102:
+                while len(layer_text) > 5 and self.small.size(layer_text)[0] > 76:
                     layer_text = layer_text[:-4] + "..."
                 label = self.small.render(
-                    layer_text, True, (226, 230, 239) if active_layer else (166, 172, 187),
+                    layer_text, True,
+                    (133, 143, 161) if layer.locked else
+                    (226, 230, 239) if active_layer else (166, 172, 187),
                 )
-                self.screen.blit(label, (rect.x + 76, row_y - 3))
+                self.screen.blit(label, (rect.x + 101, row_y - 3))
                 self.buttons.append((
-                    pygame.Rect(rect.x + 73, row_rect.y, 107, row_rect.height),
+                    pygame.Rect(rect.x + 98, row_rect.y, 82, row_rect.height),
                     f"select_layer:{index}", layer.name,
                 ))
                 base_color = (120, 139, 172) if expanded else (
@@ -4412,23 +4552,38 @@ class Editor:
             layer_name = self.layer_name_input if editing_name else layer.name
             if editing_name and (pygame.time.get_ticks() // 500) % 2 == 0:
                 layer_name += "|"
-            layer_name = self._fit_text(layer_name, self.small, row.width - 91)
+            layer_name = self._fit_text(layer_name, self.small, row.width - 120)
             name = self.small.render(f"{prefix}   {layer_name}", True, name_color)
             self.screen.blit(name, (row.x + 38, row.y + 6))
             self.buttons.append((
-                pygame.Rect(row.x + 34, row.y, row.width - 68, row.height),
+                pygame.Rect(row.x + 34, row.y, row.width - 97, row.height),
                 f"drag_layer:{index}", layer.name,
             ))
+            self._button(
+                pygame.Rect(row.right - 57, row.y + 3, 25, 21),
+                f"toggle_layer_lock:{index}", "L", layer.locked,
+            )
             self._button(
                 pygame.Rect(row.right - 29, row.y + 3, 25, 21),
                 f"rename_layer:{index}", "R", editing_name,
             )
             y += 31
 
+        active_panel_layer = self.project.layers[self.active_layer]
+        if not active_panel_layer.is_canvas:
+            opacity_field = pygame.Rect(x, y + 4, panel.width - 28, 30)
+            editing_opacity = self.property_editing == "layer_opacity"
+            self._numeric_property_widget(
+                opacity_field, LAYER_PROPERTY_SPECS["layer_opacity"],
+                active_panel_layer.opacity, "scrub:layer_opacity",
+                editing=editing_opacity,
+                input_text=self.property_input if editing_opacity else "",
+            )
+            y += 38
+
         y += 10
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 13
-        active_panel_layer = self.project.layers[self.active_layer]
         section_title = "Canvas control" if active_panel_layer.is_canvas else "Transform"
         self.screen.blit(self.font.render(section_title, True, (218, 222, 232)), (x, y))
         y += 31
@@ -4521,6 +4676,11 @@ class Editor:
             for tip in tips:
                 self.screen.blit(self.small.render(tip, True, (126, 136, 156)), (x, y))
                 y += 22
+        elif active_panel_layer.locked:
+            self.screen.blit(
+                self.small.render("Layer locked — unlock it to edit contents.", True, (255, 184, 92)),
+                (x, y),
+            )
         else:
             self.screen.blit(self.small.render("Select an object on the canvas.", True, (145, 152, 169)), (x, y))
             y += 28

@@ -20,15 +20,16 @@
    - [ ] LED-map módosítások saját undo/redo előzménnyel.
 
 4. **Részletes property timeline és Graph Editor**
-   - Külön Position, Scale, Rotation, Color, Opacity és Visibility sávok.
-   - Dobozos kijelölés, keyframe másolás/beillesztés és tömeges mozgatás.
-   - Húzható easing görbék, loop-tartomány és markerek.
+   - [x] Külön Position, Scale, Rotation, Color, Opacity és Visibility sávok.
+   - [x] Dobozos kijelölés, keyframe másolás/beillesztés és tömeges mozgatás.
+   - [x] Húzható easing görbék és loop-tartomány.
+   - [ ] Timeline-markerek és elnevezett eseménypontok.
 
 5. **Firmware-hű V4 round-trip export**
    - [x] 68 × RGB baked frame import/export, fix `frameMs` időzítéssel.
    - [x] Explicit ID, `loops`, `loopFrames`, egyszer lefutó outro és FULL/CANVAS overlay flag támogatása.
    - [x] Duplikált ID és `frames × 204` adathossz validációja.
-   - Több projekt-effekt egyetlen rendezhető `effect_data.h` könyvtárba fűzése.
+   - [x] Több projekt-effekt egyetlen `effect_data.h` könyvtárba fűzése.
 
 6. **Élő Arduino kapcsolat**
    - Soros port kiválasztása és fizikai LED-léptetés.
@@ -36,11 +37,21 @@
    - Animáció streamelése közvetlen hardveres teszthez.
 
 7. **Projektkezelés és szerkesztési eszközök**
-   - New, Open, Save As, automatikus mentés és helyreállítás.
+   - [x] New, Open, Save As, automatikus mentés és helyreállítás.
    - Több alakzat kijelölése, igazítása, elosztása és csoportosítása.
-   - Layer átnevezés, zárolás és opacity.
+   - [x] Layer átnevezés, zárolás és opacity.
 
 8. **Architektúra és Raspberry Pi teljesítmény**
    - A canvas, timeline, inspector, LED-map és firmware-import külön modulokra bontása.
    - Skálázott artworkök és fényrétegek cache-elése.
    - Windows- és Raspberry Pi-specifikus CI/smoke ellenőrzések.
+
+9. **Professional Effect Bank workflow**
+   - [ ] Azonos firmware-ID esetén választható Replace, ne vak duplikáció.
+   - [ ] Thumbnail vagy animált mini előnézet minden effekthez.
+   - [ ] Rendezés ID, név, flash-méret vagy lejátszási hossz szerint.
+   - [ ] Keresés és projekttel együtt menthető címkék.
+   - [ ] Export előtti változáslista: hozzáadás, csere, átnevezés, ID-váltás, törlés.
+   - [ ] Egyetlen effekt külön importja és exportja.
+   - [ ] `Optimize bank` elemzés pazarló FPS-re, túl hosszú effektre és loopolható szakaszokra.
+   - [ ] Összesített flash-foglalás mellett a bank teljes becsült lejátszási ideje.

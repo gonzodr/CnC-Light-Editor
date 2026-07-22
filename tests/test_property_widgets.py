@@ -1,4 +1,5 @@
 from cnc_light_editor.property_widgets import (
+    LAYER_PROPERTY_SPECS,
     RANDOM_LED_PROPERTY_SPECS,
     SHAPE_PROPERTY_SPECS,
 )
@@ -22,3 +23,11 @@ def test_shared_property_specs_normalize_integer_and_decimal_parameters():
     assert count.normalize(17.6) == 18
     assert count.normalize(100) == 68
     assert speed.normalize(8.56) == 8.6
+
+
+def test_layer_opacity_uses_the_shared_percentage_widget_contract():
+    spec = LAYER_PROPERTY_SPECS["layer_opacity"]
+
+    assert spec.display_text(0.625) == "62.5%"
+    assert spec.from_input(35) == 0.35
+    assert spec.from_input(125) == 1.0

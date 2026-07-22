@@ -14,6 +14,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Eredeti playfield-grafika és 68 pontos LED-overlay.
 - Ellipszis, téglalap, háromszög és vonal alakzat.
 - Több, külön ki- és bekapcsolható layer.
+- Layer-zárolás és teljes layer-opacity; a lock védi a shape-eket és keyframe-eket, az opacity pedig a layer teljes baked fényerejét skálázza.
 - Pozíció-, scale-, több teljes fordulatot megőrző forgatás-, szín-, opacity-, stroke- és visibility-keyframe.
 - Linear, Ease In, Ease Out és Ease In/Out interpoláció, kijelölhető keyframe-ek és idővonalas lejátszás.
 - Fill/stroke alakzatmód, állítható körvonalvastagság, keyframe-elhető peremlágyítás (Feather) és pozitív/negatív Mask Expansion.
@@ -66,6 +67,7 @@ Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a 
 - Zoom: egérgörgő a viewport felett; pásztázás: középső egérgomb vagy `Space` + húzás.
 - Inspector: az egységes numerikus property-mezőket vízszintesen húzva finoman állíthatod, rövid kattintás után pedig közvetlenül beírhatod az értéket. Ez az X/Y/W/H/ROT/TURNS/OPACITY/FEATHER/EXPAND/STROKE mezőkre és a Random LED összes paraméterére ugyanúgy érvényes. A `ROT` a körön belüli szög, a `TURNS ×N` a teljes fordulatok száma; például a `ROT` mezőbe írt `720` automatikusan `0.0° ×2` lesz, és két teljes fordulatként interpolálódik. A számbevitel támogatja a `Ctrl+A`, `Ctrl+V`, Enter és Esc műveleteket.
 - Layer-sorrend: húzd a layer sorát fel vagy le. Átnevezéshez nyomd meg a layer sorának `R` gombját, az `F2`-t, vagy kattints duplán a layer nevére az Inspectorban vagy a timeline-on; a névmező támogatja a `Ctrl+A` és `Ctrl+V` műveleteket. A timeline layernevére kattintva valóban kijelölöd a layert; ilyenkor a `Delete`/`Backspace` a teljes kijelölt layert törli. Az Inspector `D` gombja vagy a `Ctrl+D` duplikálja, a `−` gomb pedig szintén törli az aktív layert.
+- Layer lock/opacity: az Inspector és a timeline layer-sorának `L` gombja zárolja a layert. A zárolt layer továbbra is látható és exportálódik, de a shape-jei, effektjei és keyframe-jei nem módosíthatók vagy törölhetők. Az aktív layer alatt lévő `Layer opacity` mező vízszintesen húzható vagy százalékosan beírható; a teljes layer shape- és generatív effektkimenetére hat.
 - Keyframe-időzítés: kattintással jelöld ki, majd húzd az idővonal gyémántját; a snapping frame-határra igazít.
 - Lejátszás: a `Space`, a felső Play/Stop gomb és a timeline fejlécének középső `▶`/`■` gombja ugyanazt a playback állapotot vezérli. A mellette lévő `|<` és `>|` gomb pontosan egy, az effekt saját `frameMs` értéke szerinti képkockát léptet hátra vagy előre, és automatikusan megállítja a lejátszást.
 - Az inaktív layerek és nem kijelölt objektumok keyframe-jei is láthatók a saját sorukban visszafogott kékesszürke gyémántként; az aktív cél keyframe-jei maradnak kiemelve és szerkeszthetők.

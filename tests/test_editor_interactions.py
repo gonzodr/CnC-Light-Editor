@@ -220,6 +220,65 @@ def test_layer_can_be_renamed_from_inspector_and_undone():
     assert editor.project.layers[0].name == "Main sparkle pass"
 
 
+def test_layer_lock_blocks_canvas_and_keyframe_edits_until_unlocked():
+    editor = make_editor()
+    editor._create_shape("rectangle", (0.5, 0.5))
+    shape = editor.selected
+    assert shape is not None
+    shape.add_keyframe("x", 500, 0.7)
+    original_shape_count = len(editor.project.layers[0].shapes)
+
+    editor._action("toggle_layer_lock:0")
+
+    assert editor.project.layers[0].locked is True
+    assert editor.selected is None
+    assert editor._pick((0.5, 0.5)) is None
+    editor._create_shape("ellipse", (0.4, 0.4))
+    assert len(editor.project.layers[0].shapes) == original_shape_count
+
+    editor.selected_keyframes = {(shape.id, "x", 500)}
+    editor._delete_selected_keyframes()
+    assert shape.keyframes["x"][0].time_ms == 500
+    assert "Unlock" in editor.status
+
+    editor._action("toggle_layer_lock:0")
+    assert editor.project.layers[0].locked is False
+    assert editor._pick((0.7, 0.5)) is shape
+
+
+def test_layer_opacity_field_is_typeable_and_undoable():
+    editor = make_editor()
+    editor.draw()
+    field = next(
+        rect for rect, action, _label in editor.buttons if action == "scrub:layer_opacity"
+    )
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, button=1, pos=field.center, clicks=1,
+    ))
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, button=1, pos=field.center,
+    ))
+    assert editor.property_editing == "layer_opacity"
+
+    editor.property_input = "35"
+    editor.property_input_select_all = False
+    editor._handle_property_input(pygame.event.Event(
+        pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="",
+    ))
+    assert editor.project.layers[0].opacity == 0.35
+
+    editor._undo()
+    assert editor.project.layers[0].opacity == 1.0
+
+    editor.draw()
+    lock_actions = [
+        action for _rect, action, _label in editor.buttons
+        if action == "toggle_layer_lock:0"
+    ]
+    assert len(lock_actions) >= 2
+
+
 def test_f2_starts_layer_rename_and_escape_keeps_original_name():
     editor = make_editor()
 
@@ -512,7 +571,7 @@ def test_timeline_layer_selection_and_layer_delete():
     editor._create_shape("rectangle", (0.4, 0.4))
     editor.draw()
     _, _, timeline = editor.layout()
-    second_row = (timeline.x + 50, editor._timeline_track(timeline).y + 47)
+    second_row = (timeline.x + 120, editor._timeline_track(timeline).y + 47)
     editor.handle_event(
         pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": second_row})
     )

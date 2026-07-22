@@ -135,6 +135,8 @@ class Shape:
 class Layer:
     name: str
     visible: bool = True
+    locked: bool = False
+    opacity: float = 1.0
     shapes: list[Shape] = field(default_factory=list)
     effects: list[RandomLedEffect] = field(default_factory=list)
     is_canvas: bool = False
