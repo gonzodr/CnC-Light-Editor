@@ -63,6 +63,25 @@ def test_canvas_timeline_toggle_creates_stepped_on_off_keyframe():
     assert editor.project.canvas_transparency_at(500) is False
 
 
+def test_canvas_inspector_writes_explicit_enable_and_disable_keyframes():
+    editor = make_editor()
+    editor._action("canvas_layer")
+    canvas_layer = editor.project.layers[-1]
+    editor.current_ms = 500
+
+    editor._action("canvas_state:0")
+    assert canvas_layer.value_at("canvas_enabled", 500) is False
+    assert editor.selected_keyframes == {(canvas_layer.id, "canvas_enabled", 500)}
+
+    editor.current_ms = 1000
+    editor._action("canvas_state:1")
+    assert canvas_layer.value_at("canvas_enabled", 1000) is True
+
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"canvas_state:0", "canvas_state:1"}.issubset(actions)
+
+
 def test_shapes_and_random_led_effects_cannot_be_added_to_canvas_layer():
     editor = make_editor()
     editor._action("canvas_layer")
@@ -362,9 +381,14 @@ def test_timeline_layer_selection_and_layer_delete():
     assert editor.active_layer == 0
 
     editor._action("select_layer:1")
-    editor._action("delete_layer")
+    assert editor.timeline_selected_layer_id == editor.project.layers[1].id
+    assert editor.selected is None
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, {"key": pygame.K_DELETE, "mod": 0, "unicode": ""},
+    ))
     assert len(editor.project.layers) == 1
     assert editor.active_layer == 0
+    assert editor.timeline_selected_layer_id is None
 
 
 def test_timeline_layer_rows_scroll_and_keep_absolute_actions():

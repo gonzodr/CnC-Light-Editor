@@ -60,6 +60,8 @@ HELP_COLUMNS = (
             ("Ctrl + D", "Duplicate active layer"),
             ("C+ button", "Add the keyframeable Canvas layer"),
             ("Layer ON/OFF", "Toggle layer; Canvas creates a keyframe"),
+            ("Enable / Disable", "Write an explicit Canvas state key"),
+            ("Delete", "Delete a layer selected in the timeline"),
         )),
         ("VIEWPORT / SHAPES", (
             ("Arrow keys", "Move selected shape"),
@@ -188,6 +190,7 @@ class Editor:
         self.timeline_scroll_ms = 0.0
         self.timeline_layer_scroll = 0
         self.timeline_expanded_layers: set[str] = set()
+        self.timeline_selected_layer_id: str | None = None
         self.timeline_mode = "dope"
         self.graph_target_id: str | None = None
         self.graph_prop: str | None = None
@@ -344,6 +347,7 @@ class Editor:
                     if self.timeline_mode == "graph":
                         keys = self._pick_graph_key(event.pos, timeline)
                         if keys:
+                            self.timeline_selected_layer_id = None
                             if pygame.key.get_mods() & pygame.KMOD_CTRL:
                                 self.selected_keyframes.symmetric_difference_update(keys)
                             elif not self.selected_keyframes.intersection(keys):
@@ -378,6 +382,7 @@ class Editor:
                     elif action.startswith("drag_layer:"):
                         self.drag_layer_index = int(action.split(":")[1])
                         self.active_layer = self.drag_layer_index
+                        self.timeline_selected_layer_id = None
                         self.drag_origin = event.pos
                         self._begin_change()
                     elif action == "duration_slider":
@@ -418,6 +423,7 @@ class Editor:
                         return
                     keys = self._pick_graph_key(event.pos, timeline)
                     if keys:
+                        self.timeline_selected_layer_id = None
                         if pygame.key.get_mods() & pygame.KMOD_CTRL:
                             if self.selected_keyframes.intersection(keys):
                                 self.selected_keyframes.difference_update(keys)
@@ -433,6 +439,7 @@ class Editor:
                     return
                 keys = self._pick_keyframe_keys(event.pos, timeline)
                 if keys:
+                    self.timeline_selected_layer_id = None
                     key_time = next(iter(keys))[2]
                     self._remember_graph_channel(keys)
                     if pygame.key.get_mods() & pygame.KMOD_CTRL:
@@ -451,6 +458,7 @@ class Editor:
                     self._set_playhead(event.pos[0], timeline)
                 return
             if viewport.collidepoint(event.pos):
+                self.timeline_selected_layer_id = None
                 point = self._screen_to_world(event.pos, canvas)
                 if self.calibration and canvas.collidepoint(event.pos):
                     picked_led_id = self._pick_led_at_screen(event.pos, canvas)
@@ -639,6 +647,19 @@ class Editor:
         elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
             if self.selected_keyframes:
                 self._delete_selected_keyframes()
+            elif self.timeline_selected_layer_id:
+                layer_index = next(
+                    (
+                        index for index, layer in enumerate(self.project.layers)
+                        if layer.id == self.timeline_selected_layer_id
+                    ),
+                    None,
+                )
+                if layer_index is not None:
+                    self.active_layer = layer_index
+                    self._action("delete_layer")
+                else:
+                    self.timeline_selected_layer_id = None
             else:
                 self._action("delete")
         elif event.key == pygame.K_k:
@@ -680,7 +701,7 @@ class Editor:
         mutating = (
             action.startswith((
                 "add:", "color:", "fill_mode:", "gradient_type:",
-                "gradient_radial_mode:", "toggle_layer:",
+                "gradient_radial_mode:", "toggle_layer:", "canvas_state:",
             ))
             or action in {
                 "layer", "canvas_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
@@ -702,6 +723,7 @@ class Editor:
         elif action == "layer":
             self.project.layers.append(Layer(f"Layer {len(self.project.layers) + 1}"))
             self.active_layer = len(self.project.layers) - 1
+            self.timeline_selected_layer_id = None
             self.selected = None
             self._ensure_active_layer_visible()
         elif action == "canvas_layer":
@@ -711,6 +733,7 @@ class Editor:
             )
             if existing is not None:
                 self.active_layer = existing
+                self.timeline_selected_layer_id = None
                 self.selected = None
                 self.random_led_editor_open = False
                 self.timeline_expanded_layers.add(self.project.layers[existing].id)
@@ -721,6 +744,7 @@ class Editor:
                 self.project.layers.append(canvas_layer)
                 self.project.overlay = True
                 self.active_layer = len(self.project.layers) - 1
+                self.timeline_selected_layer_id = None
                 self.selected = None
                 self.random_led_editor_open = False
                 self.selected_keyframes = {(canvas_layer.id, "canvas_enabled", 0)}
@@ -751,6 +775,7 @@ class Editor:
                 self.status = "A project must keep at least one layer"
             else:
                 removed = self.project.layers.pop(self.active_layer)
+                self.timeline_selected_layer_id = None
                 self.timeline_expanded_layers.discard(removed.id)
                 if self.selected in removed.shapes:
                     self.selected = None
@@ -798,6 +823,10 @@ class Editor:
                     if any(frame.time_ms == self.current_ms for frame in self.selected.keyframes[prop])
                 }
                 self.status = f"Keyframe at {self.current_ms} ms"
+        elif action.startswith("canvas_state:"):
+            layer = self.project.layers[self.active_layer]
+            if layer.is_canvas:
+                self._set_canvas_enabled_key(layer, bool(int(action.split(":", 1)[1])))
         elif action == "stencil":
             self.stencil = not self.stencil
             if self.stencil:
@@ -1088,6 +1117,7 @@ class Editor:
                 self.timeline_expanded_layers.add(layer.id)
                 state = "expanded"
             self.active_layer = index
+            self.timeline_selected_layer_id = None
             self._ensure_active_layer_visible()
             self.status = f"Timeline layer {layer.name}: {state}"
         elif action.startswith("select_timeline_channel:"):
@@ -1102,6 +1132,7 @@ class Editor:
             )
             if target and layer_index is not None:
                 self.active_layer = layer_index
+                self.timeline_selected_layer_id = None
                 self.gradient_editor_open = False
                 if isinstance(target, Shape):
                     self.selected = target
@@ -1125,25 +1156,20 @@ class Editor:
         elif action.startswith("select_layer:"):
             self.active_layer = int(action.split(":")[1])
             layer = self.project.layers[self.active_layer]
-            if self.selected not in layer.shapes:
-                self.selected = layer.shapes[-1] if layer.shapes else None
-            if layer.is_canvas:
-                self.random_led_editor_open = False
+            self.timeline_selected_layer_id = layer.id
+            self.selected = None
+            self.random_led_editor_open = False
             self.selected_keyframes.clear()
-            self.status = f"Active layer: {layer.name}"
+            self.status = f"Selected layer: {layer.name} — Delete removes the layer"
             self._ensure_active_layer_visible()
         elif action.startswith("toggle_layer:"):
             index = int(action.split(":")[1])
             layer = self.project.layers[index]
+            self.timeline_selected_layer_id = None
             if layer.is_canvas:
                 self.active_layer = index
                 enabled = not bool(layer.value_at("canvas_enabled", self.current_ms))
-                layer.add_keyframe("canvas_enabled", self.current_ms, enabled)
-                self.selected = None
-                self.random_led_editor_open = False
-                self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
-                self.timeline_expanded_layers.add(layer.id)
-                self.status = f"Canvas: {'transparent' if enabled else 'blackout'} from {self.current_ms} ms"
+                self._set_canvas_enabled_key(layer, enabled)
             else:
                 layer.visible = not layer.visible
                 if not layer.visible and self.selected in layer.shapes:
@@ -1180,6 +1206,7 @@ class Editor:
         if self.selected is None and self.project.layers[self.active_layer].shapes:
             self.selected = self.project.layers[self.active_layer].shapes[-1]
         self.selected_keyframes.clear()
+        self.timeline_selected_layer_id = None
         self.context_menu_pos = None
 
     def _undo(self) -> None:
@@ -1206,6 +1233,7 @@ class Editor:
             return
         if history:
             self._begin_change()
+        self.timeline_selected_layer_id = None
         x, y = point
         shape = Shape(
             kind,
@@ -1894,7 +1922,15 @@ class Editor:
         return next(iter(keys))[2] if keys else None
 
     def _selected_timeline_row_y(self, timeline: pygame.Rect) -> int | None:
-        if self.project.layers[self.active_layer].is_canvas:
+        if self.timeline_selected_layer_id:
+            layer_index = next(
+                (
+                    index for index, layer in enumerate(self.project.layers)
+                    if layer.id == self.timeline_selected_layer_id
+                ),
+                None,
+            )
+        elif self.project.layers[self.active_layer].is_canvas:
             layer_index = self.active_layer
         elif self.random_led_editor_open and self._active_random_led_effect():
             layer_index = self.active_layer
@@ -1966,6 +2002,8 @@ class Editor:
                 self.context_menu_pos = pos
         elif not self.keyframe_marquee_additive:
             self.selected_keyframes.clear()
+        if self.selected_keyframes:
+            self.timeline_selected_layer_id = None
         self.drag_mode = None
         self.keyframe_marquee_current = None
         self.keyframe_right_click_time = None
@@ -2162,6 +2200,7 @@ class Editor:
         layer = self.project.layers.pop(source)
         self.project.layers.insert(target, layer)
         self.active_layer = target
+        self.timeline_selected_layer_id = None
         self.status = f"Moved layer to position {target + 1}"
 
     def _scrub_property(self, screen_x: int) -> None:
@@ -2208,6 +2247,15 @@ class Editor:
             setattr(self.selected, prop, value)
         else:
             self.selected.add_keyframe(prop, self.current_ms, value)
+
+    def _set_canvas_enabled_key(self, layer: Layer, enabled: bool) -> None:
+        layer.add_keyframe("canvas_enabled", self.current_ms, enabled)
+        self.selected = None
+        self.random_led_editor_open = False
+        self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
+        self.timeline_expanded_layers.add(layer.id)
+        mode = "transparent empty LEDs" if enabled else "blackout empty LEDs"
+        self.status = f"Canvas {'enabled' if enabled else 'disabled'} at {self.current_ms} ms — {mode}"
 
     def _set_rotation_total(self, total_degrees: float) -> None:
         turns = math.floor(total_degrees / 360.0)
@@ -2297,6 +2345,7 @@ class Editor:
         self.saved_project_state = deepcopy(project.to_dict())
         self.selected = None
         self.selected_keyframes.clear()
+        self.timeline_selected_layer_id = None
         self.active_layer = 0
         self.current_ms = 0
         self.playing = False
@@ -3596,6 +3645,7 @@ class Editor:
             row_rect = pygame.Rect(rect.x, row_y - 11, rect.width, 31)
             if timeline_row.kind == "layer":
                 expanded = layer.id in self.timeline_expanded_layers
+                layer_selected = layer.id == self.timeline_selected_layer_id
                 layer_on = (
                     bool(layer.value_at("canvas_enabled", self.current_ms))
                     if layer.is_canvas else layer.visible
@@ -3603,6 +3653,8 @@ class Editor:
                 if active_layer:
                     pygame.draw.rect(self.screen, (42, 54, 76), row_rect)
                     pygame.draw.rect(self.screen, ACCENT, (row_rect.x, row_rect.y, 3, row_rect.height))
+                if layer_selected:
+                    pygame.draw.rect(self.screen, (255, 202, 70), row_rect, 1)
                 self._button(
                     pygame.Rect(rect.x + 7, row_rect.y + 5, 37, 21),
                     f"toggle_layer:{index}", "ON" if layer_on else "OFF", layer_on,
@@ -3809,7 +3861,9 @@ class Editor:
         y += 10
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 13
-        self.screen.blit(self.font.render("Transform", True, (218, 222, 232)), (x, y))
+        active_panel_layer = self.project.layers[self.active_layer]
+        section_title = "Canvas control" if active_panel_layer.is_canvas else "Transform"
+        self.screen.blit(self.font.render(section_title, True, (218, 222, 232)), (x, y))
         y += 31
         if self.selected:
             state = self.selected.state_at(self.current_ms)
@@ -3897,6 +3951,34 @@ class Editor:
             y += 43
             self._button(pygame.Rect(x, y, 132, 30), "duplicate", "Duplicate", False)
             self._button(pygame.Rect(x + 143, y, 132, 30), "delete", "Delete", False)
+        elif active_panel_layer.is_canvas:
+            enabled = bool(active_panel_layer.value_at("canvas_enabled", self.current_ms))
+            state_label = "ENABLED · empty LEDs transparent" if enabled else "DISABLED · empty LEDs black"
+            state_color = (105, 218, 174) if enabled else (255, 171, 83)
+            self.screen.blit(self.small.render(state_label, True, state_color), (x, y))
+            y += 30
+            self._button(
+                pygame.Rect(x, y, 132, 32), "canvas_state:1", "Enable key", enabled,
+            )
+            self._button(
+                pygame.Rect(x + 143, y, 132, 32), "canvas_state:0", "Disable key", not enabled,
+            )
+            y += 45
+            has_key = any(
+                frame.time_ms == self.current_ms
+                for frame in active_panel_layer.keyframes.get("canvas_enabled", [])
+            )
+            key_status = "Keyframe exists at playhead" if has_key else "No Canvas keyframe at playhead"
+            self.screen.blit(self.small.render(key_status, True, (151, 161, 180)), (x, y))
+            y += 26
+            tips = (
+                "Enable: untouched LEDs use FF00FF / transparent.",
+                "Disable: untouched LEDs export opaque black.",
+                "The timeline ON/OFF button and V toggle the state.",
+            )
+            for tip in tips:
+                self.screen.blit(self.small.render(tip, True, (126, 136, 156)), (x, y))
+                y += 22
         else:
             self.screen.blit(self.small.render("Select an object on the canvas.", True, (145, 152, 169)), (x, y))
             y += 28
