@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import cos, radians, sin, sqrt
+from math import atan2, cos, degrees, radians, sin, sqrt
 import random
 from typing import Iterable
 
@@ -98,7 +98,11 @@ def gradient_color(state: dict, point: tuple[float, float]) -> Color:
     half_w = max(float(state["width"]) / 2, 0.0001)
     half_h = max(float(state["height"]) / 2, 0.0001)
     if gradient_type == "radial":
-        amount = sqrt((x / half_w) ** 2 + (y / half_h) ** 2)
+        if state.get("gradient_radial_mode", "radius") == "angular":
+            phase = float(state.get("gradient_angle", 0.0))
+            amount = ((degrees(atan2(y / half_h, x / half_w)) - phase) % 360.0) / 360.0
+        else:
+            amount = sqrt((x / half_w) ** 2 + (y / half_h) ** 2)
     else:
         angle = radians(float(state.get("gradient_angle", 0.0)))
         direction_x, direction_y = cos(angle), sin(angle)

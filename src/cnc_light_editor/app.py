@@ -465,7 +465,10 @@ class Editor:
 
     def _action(self, action: str) -> None:
         mutating = (
-            action.startswith(("add:", "color:", "fill_mode:", "gradient_type:", "toggle_layer:"))
+            action.startswith((
+                "add:", "color:", "fill_mode:", "gradient_type:",
+                "gradient_radial_mode:", "toggle_layer:",
+            ))
             or action in {
                 "layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
@@ -534,7 +537,8 @@ class Editor:
             state = self.selected.state_at(self.current_ms)
             for prop in (
                 "x", "y", "width", "height", "rotation", "color", "opacity",
-                "fill_mode", "stroke_width", "gradient_type", "gradient_angle", "visible",
+                "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
+                "gradient_angle", "visible",
             ):
                 self.selected.add_keyframe(prop, self.current_ms, state[prop])
             self.selected_keyframes = {
@@ -638,6 +642,10 @@ class Editor:
             gradient_type = action.split(":", 1)[1]
             self._set_animated("gradient_type", gradient_type)
             self.status = f"Gradient fill: {gradient_type}"
+        elif action.startswith("gradient_radial_mode:") and self.selected:
+            radial_mode = action.split(":", 1)[1]
+            self._set_animated("gradient_radial_mode", radial_mode)
+            self.status = f"Radial gradient: {radial_mode}"
         elif action == "gradient_add_stop" and self.selected:
             self._add_gradient_stop()
         elif action == "gradient_delete_stop" and self.selected:
@@ -1004,11 +1012,11 @@ class Editor:
 
     def _gradient_bar_rect(self) -> pygame.Rect:
         panel_x = self.screen.get_width() - INSPECTOR_WIDTH
-        return pygame.Rect(panel_x + 22, TOP_BAR + 220, INSPECTOR_WIDTH - 44, 28)
+        return pygame.Rect(panel_x + 22, TOP_BAR + 290, INSPECTOR_WIDTH - 44, 28)
 
     def _gradient_angle_rect(self) -> pygame.Rect:
         panel_x = self.screen.get_width() - INSPECTOR_WIDTH
-        return pygame.Rect(panel_x + 22, TOP_BAR + 377, INSPECTOR_WIDTH - 44, 18)
+        return pygame.Rect(panel_x + 22, TOP_BAR + 447, INSPECTOR_WIDTH - 44, 18)
 
     def _selected_gradient_stop(self) -> GradientStop | None:
         if not self.selected:
@@ -1056,7 +1064,14 @@ class Editor:
         slider = self._gradient_angle_rect()
         ratio = max(0.0, min(1.0, (screen_x - slider.x) / max(1, slider.width)))
         self._set_animated("gradient_angle", round(ratio * 360.0, 1))
-        self.status = f"Gradient angle: {round(ratio * 360.0, 1):.1f}°"
+        state = self.selected.state_at(self.current_ms)
+        label = (
+            "Angular gradient phase"
+            if state.get("gradient_type") == "radial"
+            and state.get("gradient_radial_mode", "radius") == "angular"
+            else "Gradient angle"
+        )
+        self.status = f"{label}: {round(ratio * 360.0, 1):.1f}°"
 
     def _timeline_window(self) -> tuple[float, float]:
         visible_ms = self._playback_duration() / self.timeline_zoom
@@ -1970,6 +1985,7 @@ class Editor:
             )
         gradient_fill = self._gradient_surface(
             local.size, state["gradient_stops"], state["gradient_type"],
+            state.get("gradient_radial_mode", "radius"),
             float(state.get("gradient_angle", 0.0)), int(220 * state["opacity"]),
         )
         gradient = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
@@ -1980,10 +1996,28 @@ class Editor:
     @staticmethod
     def _gradient_surface(
         size: tuple[int, int], stops: list[GradientStop], gradient_type: str,
-        angle: float, alpha: int,
+        radial_mode: str, angle: float, alpha: int,
     ) -> pygame.Surface:
         width, height = size
         if gradient_type == "radial":
+            if radial_mode == "angular":
+                side = max(2, max(width, height))
+                square = pygame.Surface((side, side), pygame.SRCALPHA)
+                center = (side // 2, side // 2)
+                radius = math.hypot(side, side)
+                steps = 240
+                for index in range(steps):
+                    amount = index / steps
+                    start = math.radians(angle + index * 360.0 / steps)
+                    end = math.radians(angle + (index + 1) * 360.0 / steps)
+                    points = [
+                        center,
+                        (center[0] + math.cos(start) * radius, center[1] + math.sin(start) * radius),
+                        (center[0] + math.cos(end) * radius, center[1] + math.sin(end) * radius),
+                    ]
+                    pygame.draw.polygon(square, (*sample_gradient(stops, amount), alpha), points)
+                return pygame.transform.smoothscale(square, size)
+
             result = pygame.Surface(size, pygame.SRCALPHA)
             result.fill((*sample_gradient(stops, 1.0), alpha))
             steps = max(32, min(160, max(width, height)))
@@ -2516,11 +2550,24 @@ class Editor:
         y += 31
         self.screen.blit(self.small.render("Type", True, (172, 178, 193)), (x, y)); y += 22
         gradient_type = state.get("gradient_type", "solid")
+        radial_mode = state.get("gradient_radial_mode", "radius")
         for index, (value, label) in enumerate((("solid", "Solid"), ("linear", "Linear"), ("radial", "Radial"))):
             self._button(
                 pygame.Rect(x + index * 93, y, 86, 30), f"gradient_type:{value}", label,
                 gradient_type == value,
             )
+
+        radial_label_color = (172, 178, 193) if gradient_type == "radial" else (102, 108, 122)
+        self.screen.blit(self.small.render("Radial direction", True, radial_label_color), (x, y + 40))
+        for index, (value, label) in enumerate((("radius", "Radius"), ("angular", "Angular"))):
+            rect = pygame.Rect(x + index * 143, y + 59, 132, 30)
+            if gradient_type == "radial":
+                self._button(rect, f"gradient_radial_mode:{value}", label, radial_mode == value)
+            else:
+                pygame.draw.rect(self.screen, (35, 38, 47), rect, border_radius=5)
+                pygame.draw.rect(self.screen, (60, 65, 78), rect, 1, border_radius=5)
+                text = self.small.render(label, True, (91, 97, 112))
+                self.screen.blit(text, text.get_rect(center=rect.center))
 
         bar = self._gradient_bar_rect()
         self.screen.blit(self.small.render("Color stops", True, (172, 178, 193)), (x, bar.y - 25))
@@ -2554,16 +2601,24 @@ class Editor:
 
         angle = float(state.get("gradient_angle", 0.0)) % 360.0
         angle_y = button_y + 49
-        angle_color = (172, 178, 193) if gradient_type == "linear" else (102, 108, 122)
-        self.screen.blit(self.small.render(f"Angle  {angle:.1f}°", True, angle_color), (x, angle_y))
+        angle_enabled = gradient_type == "linear" or (
+            gradient_type == "radial" and radial_mode == "angular"
+        )
+        angle_name = "Phase" if gradient_type == "radial" and radial_mode == "angular" else "Angle"
+        angle_color = (172, 178, 193) if angle_enabled else (102, 108, 122)
+        self.screen.blit(self.small.render(f"{angle_name}  {angle:.1f}°", True, angle_color), (x, angle_y))
         slider = self._gradient_angle_rect()
         pygame.draw.line(self.screen, (92, 101, 120), slider.midleft, slider.midright, 4)
         handle_x = round(slider.x + angle / 360.0 * slider.width)
-        pygame.draw.circle(self.screen, ACCENT if gradient_type == "linear" else (75, 81, 96), (handle_x, slider.centery), 8)
-        if gradient_type == "linear":
-            self.buttons.append((slider.inflate(0, 18), "gradient_angle", "Gradient angle"))
+        pygame.draw.circle(self.screen, ACCENT if angle_enabled else (75, 81, 96), (handle_x, slider.centery), 8)
+        if angle_enabled:
+            self.buttons.append((slider.inflate(0, 18), "gradient_angle", f"Gradient {angle_name.lower()}"))
         else:
-            note = "Angle is available in Linear mode"
+            note = (
+                "Phase is available in Angular mode"
+                if gradient_type == "radial" else
+                "Angle is available in Linear/Angular mode"
+            )
             self.screen.blit(self.small.render(note, True, (105, 112, 129)), (x, slider.bottom + 8))
 
         palette_y = slider.bottom + 44

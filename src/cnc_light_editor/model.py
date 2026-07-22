@@ -65,6 +65,7 @@ class Shape:
     fill_mode: str = "fill"
     stroke_width: float = 0.012
     gradient_type: str = "solid"
+    gradient_radial_mode: str = "radius"
     gradient_angle: float = 0.0
     gradient_stops: list[GradientStop] = field(default_factory=list)
     visible: bool = True
@@ -89,7 +90,9 @@ class Shape:
                 after = frame
                 break
             before = frame
-        if after is None or prop in {"visible", "fill_mode", "gradient_type"}:
+        if after is None or prop in {
+            "visible", "fill_mode", "gradient_type", "gradient_radial_mode",
+        }:
             return before.value
         span = after.time_ms - before.time_ms
         amount = 0.0 if span == 0 else (time_ms - before.time_ms) / span
@@ -99,7 +102,8 @@ class Shape:
     def state_at(self, time_ms: int) -> dict[str, Any]:
         state = {prop: self.value_at(prop, time_ms) for prop in (
             "x", "y", "width", "height", "rotation", "color", "opacity",
-            "fill_mode", "stroke_width", "gradient_type", "gradient_angle", "visible",
+            "fill_mode", "stroke_width", "gradient_type", "gradient_radial_mode",
+            "gradient_angle", "visible",
         )}
         state["gradient_stops"] = self.gradient_stops
         return state

@@ -663,6 +663,29 @@ def test_gradient_panel_exposes_type_stop_and_angle_controls():
     assert {"gradient_type:linear", "gradient_type:radial", "gradient_bar", "gradient_angle"} <= actions
 
 
+def test_radial_gradient_panel_switches_between_radius_and_angular_modes():
+    editor = make_editor()
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor._action("gradient_editor")
+    editor._action("gradient_type:radial")
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+
+    assert {"gradient_radial_mode:radius", "gradient_radial_mode:angular"} <= actions
+    assert "gradient_angle" not in actions
+
+    editor._action("gradient_radial_mode:angular")
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert editor.selected.gradient_radial_mode == "angular"
+    assert "gradient_angle" in actions
+
+    angle = editor._gradient_angle_rect()
+    editor._set_gradient_angle_from_x(angle.centerx)
+    assert editor.selected.gradient_angle == 180.0
+    assert editor.status.startswith("Angular gradient phase")
+
+
 def test_random_led_editor_creates_effect_and_keyframes_enabled_state():
     editor = make_editor()
 

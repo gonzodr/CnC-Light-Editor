@@ -135,9 +135,38 @@ def test_radial_gradient_runs_from_center_to_shape_edge():
     ]
 
 
+def test_angular_radial_gradient_runs_clockwise_around_shape_center():
+    shape = Shape(
+        "ellipse", "angular", width=1.0, height=1.0,
+        gradient_type="radial", gradient_radial_mode="angular",
+        gradient_stops=[GradientStop(0.0, (0, 0, 0)), GradientStop(1.0, (200, 0, 0))],
+    )
+    project = Project(layers=[Layer("gradient", shapes=[shape])])
+
+    assert render_leds(
+        project,
+        [(1.0, 0.5), (0.5, 1.0), (0.0, 0.5), (0.5, 0.0)],
+        0,
+    ) == [(0, 0, 0), (50, 0, 0), (100, 0, 0), (150, 0, 0)]
+
+
+def test_angular_radial_gradient_angle_sets_start_phase():
+    shape = Shape(
+        "ellipse", "angular", width=1.0, height=1.0,
+        gradient_type="radial", gradient_radial_mode="angular", gradient_angle=90,
+        gradient_stops=[GradientStop(0.0, (0, 0, 0)), GradientStop(1.0, (200, 0, 0))],
+    )
+    project = Project(layers=[Layer("gradient", shapes=[shape])])
+
+    assert render_leds(project, [(0.5, 1.0)], 0) == [(0, 0, 0)]
+
+
 def test_project_round_trip_preserves_gradient_stops(tmp_path):
     stop = GradientStop(0.35, (12, 34, 56))
-    shape = Shape("rectangle", "gradient", gradient_type="linear", gradient_stops=[stop])
+    shape = Shape(
+        "rectangle", "gradient", gradient_type="radial",
+        gradient_radial_mode="angular", gradient_stops=[stop],
+    )
     project = Project(layers=[Layer("gradient", shapes=[shape])])
     path = tmp_path / "gradient.cnclight"
 
@@ -148,6 +177,7 @@ def test_project_round_trip_preserves_gradient_stops(tmp_path):
     assert loaded_stop.position == 0.35
     assert loaded_stop.color == (12, 34, 56)
     assert loaded_stop.id == stop.id
+    assert loaded.layers[0].shapes[0].gradient_radial_mode == "angular"
 
 
 def test_random_led_effect_ignores_layer_shape_mask_and_is_deterministic():
