@@ -55,6 +55,7 @@ HELP_COLUMNS = (
         )),
         ("TIMELINE / KEYFRAMES", (
             ("Space", "Play / pause"),
+            ("|<  /  >|", "Step exactly one frame"),
             ("K", "Add keyframe at playhead"),
             ("V", "Toggle shape or Canvas state"),
             ("Ctrl + C / V", "Copy / paste selected keyframes"),
@@ -362,6 +363,14 @@ class Editor:
             return
 
         if event.type == pygame.KEYDOWN:
+            if (
+                event.key == pygame.K_SPACE
+                and not self.led_name_editing
+                and not self.layer_name_editing_id
+            ):
+                self.space_down = True
+                self._handle_key(event)
+                return
             if self.led_id_editing:
                 self._handle_led_id_input(event)
                 return
@@ -392,8 +401,6 @@ class Editor:
                 self.random_led_editor_open = False
                 self.status = "Closed Random LED editor"
                 return
-            if event.key == pygame.K_SPACE:
-                self.space_down = True
             self._handle_key(event)
             return
         if event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
@@ -741,8 +748,9 @@ class Editor:
             self.status = "Timeline resized, but its UI preference could not be saved"
 
     def _handle_key(self, event: pygame.event.Event) -> None:
-        ctrl = bool(event.mod & pygame.KMOD_CTRL)
-        shift = bool(event.mod & pygame.KMOD_SHIFT)
+        modifiers = getattr(event, "mod", pygame.key.get_mods())
+        ctrl = bool(modifiers & pygame.KMOD_CTRL)
+        shift = bool(modifiers & pygame.KMOD_SHIFT)
         if ctrl and event.key == pygame.K_z:
             self._redo() if shift else self._undo()
             return
@@ -764,6 +772,10 @@ class Editor:
         if ctrl and event.key == pygame.K_n:
             self._action("new")
             return
+        if event.key == pygame.K_SPACE:
+            if not getattr(event, "repeat", False):
+                self._toggle_playback()
+            return
         if self.calibration:
             if event.key == pygame.K_ESCAPE and self.drag_mode == "led_move":
                 self._cancel_led_move()
@@ -781,8 +793,6 @@ class Editor:
 
         if event.key == pygame.K_F2:
             self._start_layer_rename(self.active_layer)
-        elif event.key == pygame.K_SPACE:
-            self.playing = not self.playing
         elif event.key == pygame.K_s and ctrl:
             self._action("save_as" if shift else "save")
         elif event.key == pygame.K_o and ctrl:
@@ -988,7 +998,9 @@ class Editor:
             self.playing = False
             self.selected = None
         elif action == "play":
-            self.playing = not self.playing
+            self._toggle_playback()
+        elif action.startswith("step_frame:"):
+            self._step_frame(int(action.split(":", 1)[1]))
         elif action == "snap":
             self.snap = not self.snap
             self.status = f"Snapping {'on' if self.snap else 'off'}"
@@ -2590,6 +2602,29 @@ class Editor:
         effect = self._active_imported_effect()
         return effect.duration_ms if effect else self.project.duration_ms
 
+    def _toggle_playback(self) -> None:
+        self.playing = not self.playing
+        if self.playing:
+            duration = max(1, self._playback_duration())
+            if self.current_ms >= duration:
+                self.current_ms = 0
+            self.status = "Playing animation"
+        else:
+            self.status = "Playback stopped"
+
+    def _step_frame(self, direction: int) -> None:
+        frame_ms = max(1, round(self._timeline_frame_ms()))
+        duration = max(1, self._playback_duration())
+        last_frame = max(0, (duration - 1) // frame_ms)
+        if direction < 0:
+            frame_index = math.ceil(self.current_ms / frame_ms) - 1
+        else:
+            frame_index = math.floor(self.current_ms / frame_ms) + 1
+        frame_index = max(0, min(last_frame, frame_index))
+        self.current_ms = frame_index * frame_ms
+        self.playing = False
+        self.status = f"Frame {frame_index}  •  {self.current_ms} ms"
+
     def load_effect_data_file(self, path: str | Path) -> None:
         path = Path(path)
         self.imported_effects = load_effect_data(path)
@@ -3631,7 +3666,7 @@ class Editor:
             project_label += "  •"
         self.screen.blit(self.small.render(project_label, True, (108, 180, 255)), (16, 29))
         items = [
-            ("play", "Pause" if self.playing else "Play"),
+            ("play", "Stop" if self.playing else "Play"),
             ("keyframe", "+ Keyframe"),
             ("stencil", "Stencil"),
             ("calibration", "LED map"),
@@ -4074,6 +4109,18 @@ class Editor:
         )
         timecode = f"F{int(self.current_ms // frame_ms):03d}" if frame_ruler else f"{self.current_ms / 1000:05.2f}s"
         self.screen.blit(self.small.render(timecode, True, (108, 180, 255)), (rect.x + 126, rect.y + 12))
+        self._transport_button(
+            pygame.Rect(rect.x + 184, rect.y + 5, 32, 25),
+            "step_frame:-1", "previous",
+        )
+        self._transport_button(
+            pygame.Rect(rect.x + 221, rect.y + 5, 40, 25),
+            "play", "stop" if self.playing else "play", self.playing,
+        )
+        self._transport_button(
+            pygame.Rect(rect.x + 266, rect.y + 5, 32, 25),
+            "step_frame:1", "next",
+        )
         if frame_ruler:
             grid_text = (
                 f"FRAME GRID  •  {frame_ms:g} ms  •  {self.timeline_zoom:.1f}x"
@@ -5135,6 +5182,43 @@ class Editor:
         pygame.draw.rect(self.screen, (91, 98, 117), rect, 1, border_radius=4)
         text = self.small.render(label, True, (245, 246, 250))
         self.screen.blit(text, text.get_rect(center=rect.center))
+        self.buttons.append((rect, action, label))
+
+    def _transport_button(
+        self, rect: pygame.Rect, action: str, icon: str, active: bool = False,
+    ) -> None:
+        hovered = rect.collidepoint(pygame.mouse.get_pos())
+        color = (77, 99, 150) if active else (58, 65, 82) if hovered else (49, 54, 68)
+        pygame.draw.rect(self.screen, color, rect, border_radius=4)
+        pygame.draw.rect(
+            self.screen, ACCENT if active else (91, 98, 117), rect, 1, border_radius=4,
+        )
+        ink = (246, 248, 252)
+        center_x, center_y = rect.center
+        if icon == "stop":
+            pygame.draw.rect(self.screen, ink, pygame.Rect(center_x - 5, center_y - 5, 10, 10))
+        else:
+            points = (
+                [(center_x - 5, center_y - 7), (center_x + 7, center_y), (center_x - 5, center_y + 7)]
+                if icon in {"play", "next"} else
+                [(center_x + 5, center_y - 7), (center_x - 7, center_y), (center_x + 5, center_y + 7)]
+            )
+            if icon == "previous":
+                pygame.draw.line(
+                    self.screen, ink, (center_x - 8, center_y - 7),
+                    (center_x - 8, center_y + 7), 2,
+                )
+                points = [(x + 2, y) for x, y in points]
+            elif icon == "next":
+                pygame.draw.line(
+                    self.screen, ink, (center_x + 8, center_y - 7),
+                    (center_x + 8, center_y + 7), 2,
+                )
+                points = [(x - 2, y) for x, y in points]
+            pygame.draw.polygon(self.screen, ink, points)
+        label = {
+            "previous": "Previous frame", "play": "Play", "stop": "Stop", "next": "Next frame",
+        }[icon]
         self.buttons.append((rect, action, label))
 
 

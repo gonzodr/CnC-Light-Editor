@@ -80,6 +80,53 @@ def test_timeline_resize_drag_clamps_resets_and_persists(tmp_path):
     assert restored.layout()[2].height == 520
 
 
+def test_space_and_timeline_controls_share_reliable_playback_state():
+    editor = make_editor()
+
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, key=pygame.K_SPACE, mod=0, unicode=" ", repeat=False,
+    ))
+    assert editor.playing is True
+    editor.handle_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_SPACE, mod=0))
+
+    editor.draw()
+    timeline = editor.layout()[2]
+    timeline_controls = {
+        action: label for rect, action, label in editor.buttons
+        if timeline.collidepoint(rect.center)
+    }
+    assert timeline_controls["play"] == "Stop"
+    assert {"step_frame:-1", "step_frame:1"} <= timeline_controls.keys()
+
+    editor._action("play")
+    assert editor.playing is False
+
+    editor.duration_editing = True
+    editor.handle_event(pygame.event.Event(
+        pygame.KEYDOWN, key=pygame.K_SPACE, mod=0, unicode=" ", repeat=False,
+    ))
+    assert editor.playing is True
+
+
+def test_frame_step_snaps_to_project_frames_pauses_and_clamps():
+    editor = make_editor()
+    editor.project.frame_ms = 50
+    editor.project.duration_ms = 500
+    editor.current_ms = 75
+    editor.playing = True
+
+    editor._action("step_frame:-1")
+    assert editor.current_ms == 50
+    assert editor.playing is False
+
+    editor._action("step_frame:1")
+    assert editor.current_ms == 100
+
+    editor.current_ms = 450
+    editor._action("step_frame:1")
+    assert editor.current_ms == 450
+
+
 def test_canvas_layer_is_unique_undoable_and_owns_a_timeline_channel():
     editor = make_editor()
 
@@ -1203,10 +1250,11 @@ def test_led_can_be_moved_added_and_deleted_in_calibration():
     if original_count >= 68:
         editor._delete_led()
         original_count -= 1
+    world_x, world_y = editor._screen_to_world(canvas.center, canvas)
     editor._move_selected_led(canvas.center, canvas)
     moved = editor._current_led()
-    assert moved.x == round(editor.led_map.width / 2)
-    assert moved.y == round(editor.led_map.height / 2)
+    assert moved.x == round(world_x * editor.led_map.width)
+    assert moved.y == round(world_y * editor.led_map.height)
 
     editor._action("add_led")
     assert len(editor.led_map.leds) == original_count + 1
