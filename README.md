@@ -30,6 +30,7 @@ Pygame-alapú, réteges és keyframe-es fényeffekt-szerkesztő a Cheech & Chong
 - Forgó, három példányos automatikus recovery-mentés és induláskor megjelenő Recover/Discard ablak; a kézi projektmentés után a recovery-pillanatképek automatikusan törlődnek.
 - A végleges V4 `EffectDef` protokollal kompatibilis Arduino `PROGMEM` export explicit ID, `frameMs`, `loops`, `loopFrames` és `overlay` metaadatokkal. Az azonos képkockák is megmaradnak, mert a motor fix frame-idővel játszik.
 - Külön Effect Bank / Export ablak a meglévő `effect_data.h` feltérképezéséhez, több effekt együttes újraexportálásához és a fix 150 KiB flash-keret vizuális tervezéséhez. Az editor által exportált effektek a szerkeszthető projektjüket is hordozzák tömörített kommentként, és közvetlenül visszatölthetők a bankból.
+- Egységes hover/active/destructive gombállapotok, kontextusérzékeny súgóbuborékok, tagolt Inspector-fejlécek és GUIDE/STENCIL viewport-jelvény a gyorsabb vizuális tájékozódáshoz.
 
 ## Telepítés Windows alatt
 

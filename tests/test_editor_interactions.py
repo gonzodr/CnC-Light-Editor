@@ -340,6 +340,18 @@ def test_help_button_and_f1_open_a_modal_that_escape_closes():
     assert editor.help_open is False
 
 
+def test_hover_tooltip_explains_snap_behavior(monkeypatch):
+    editor = make_editor()
+    editor.screen.fill((1, 2, 3))
+    target = pygame.Rect(100, 100, 50, 30)
+    editor.buttons = [(target, "snap", "Snap")]
+    monkeypatch.setattr(pygame.mouse, "get_pos", lambda: target.center)
+
+    editor._draw_hover_tooltip()
+
+    assert editor.screen.get_at((target.centerx + 18, target.centery + 20))[:3] != (1, 2, 3)
+
+
 def test_drag_created_shape_can_be_undone_and_redone():
     editor = make_editor()
     editor._create_shape("rectangle", (0.25, 0.4))

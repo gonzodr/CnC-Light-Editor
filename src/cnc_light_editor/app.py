@@ -48,6 +48,28 @@ BANK_COLORS = [
     (74, 151, 255), (118, 92, 246), (224, 82, 151), (255, 126, 64),
     (244, 190, 55), (74, 198, 126), (48, 188, 202), (150, 104, 218),
 ]
+ACTION_TOOLTIPS = {
+    "play": "Space · Play or pause the animation",
+    "keyframe": "K · Add a keyframe at the playhead",
+    "stencil": "Preview the animation through the playfield artwork",
+    "calibration": "Open LED Map calibration and firmware ID editing",
+    "save": "Ctrl+S · Save the current project",
+    "load": "Ctrl+O · Load a project",
+    "export": "Open the Effect Bank and firmware exporter",
+    "new": "Ctrl+N · Start a new project",
+    "help": "F1 · Open shortcuts and help",
+    "exit": "Exit the editor safely",
+    "snap": "Snap timeline edits and the playhead to exact frame boundaries",
+    "import_effect_data": "Import and preview effects from effect_data.h",
+    "canvas_layer": "Add the keyframeable Canvas transparency layer",
+    "random_led_editor": "Add or edit a firmware-order Random LED effect",
+    "duplicate_layer": "Ctrl+D · Duplicate the active layer",
+    "delete_layer": "Delete the active layer",
+    "layer": "Add a new shape layer",
+    "gradient_editor": "Edit gradient colors, stops, direction and radial mode",
+    "duplicate": "Ctrl+D · Duplicate the selected object",
+    "delete": "Delete the selected object or keyframes",
+}
 HELP_COLUMNS = (
     (
         ("PROJECT", (
@@ -4176,6 +4198,8 @@ class Editor:
 
         old_clip = self.screen.get_clip()
         self.screen.set_clip(viewport)
+        pygame.draw.rect(self.screen, (11, 13, 17), canvas.move(5, 6), border_radius=3)
+        pygame.draw.rect(self.screen, (16, 18, 23), canvas, border_radius=2)
         if self.stencil:
             self._draw_leds(canvas, stencil_back=True)
             self._draw_view_surface("artwork", canvas)
@@ -4184,7 +4208,8 @@ class Editor:
             self._draw_shapes(canvas)
             self._draw_selection(canvas)
             self._draw_leds(canvas)
-        pygame.draw.rect(self.screen, (89, 96, 112), canvas, 1)
+        pygame.draw.rect(self.screen, ACCENT if self.stencil else (89, 96, 112), canvas, 1)
+        self._draw_viewport_badge(viewport)
         self.screen.set_clip(old_clip)
 
         self._draw_timeline(timeline)
@@ -4205,6 +4230,44 @@ class Editor:
             self._draw_file_browser()
         if self.confirmation_open:
             self._draw_confirmation_dialog()
+        self._draw_hover_tooltip()
+
+    def _draw_viewport_badge(self, viewport: pygame.Rect) -> None:
+        mode = "STENCIL PREVIEW" if self.stencil else "GUIDE VIEW"
+        color = (101, 214, 180) if self.stencil else (119, 174, 255)
+        label = self.small.render(f"{mode}   ·   {round(self.zoom * 100)}%", True, color)
+        badge = label.get_rect(topleft=(viewport.x + 12, viewport.y + 12)).inflate(18, 10)
+        fill = pygame.Surface(badge.size, pygame.SRCALPHA)
+        fill.fill((18, 21, 28, 222))
+        self.screen.blit(fill, badge)
+        pygame.draw.rect(self.screen, (*color, 180), badge, 1, border_radius=4)
+        self.screen.blit(label, label.get_rect(center=badge.center))
+
+    def _draw_hover_tooltip(self) -> None:
+        if any((self.context_menu_pos, self.help_open, self.file_browser_open, self.confirmation_open)):
+            return
+        mouse = pygame.mouse.get_pos()
+        hovered = next(
+            ((action, label) for rect, action, label in reversed(self.buttons) if rect.collidepoint(mouse)),
+            None,
+        )
+        if not hovered:
+            return
+        action, fallback = hovered
+        action_base = action.split(":", 1)[0]
+        message = ACTION_TOOLTIPS.get(action, ACTION_TOOLTIPS.get(action_base, fallback))
+        if not message:
+            return
+        message = self._fit_text(message, self.small, min(430, self.screen.get_width() - 40))
+        text = self.small.render(message, True, (238, 241, 248))
+        box = text.get_rect(topleft=(mouse[0] + 16, mouse[1] + 18)).inflate(18, 12)
+        if box.right > self.screen.get_width() - 8:
+            box.right = self.screen.get_width() - 8
+        if box.bottom > self.screen.get_height() - 8:
+            box.bottom = mouse[1] - 12
+        pygame.draw.rect(self.screen, (14, 16, 21), box, border_radius=5)
+        pygame.draw.rect(self.screen, (93, 107, 132), box, 1, border_radius=5)
+        self.screen.blit(text, text.get_rect(center=box.center))
 
     def _draw_view_surface(self, mode: str, canvas: pygame.Rect) -> None:
         """Draw only the visible playfield region instead of scaling its full canvas.
@@ -5053,11 +5116,17 @@ class Editor:
         pygame.draw.rect(self.screen, (29, 32, 40), zoom_rect, border_radius=3)
         self.screen.blit(zoom_label, zoom_label.get_rect(center=zoom_rect.center))
 
+    def _draw_panel_section(self, x: int, y: int, title: str) -> None:
+        pygame.draw.rect(self.screen, ACCENT, pygame.Rect(x, y + 2, 3, 18), border_radius=2)
+        self.screen.blit(self.font.render(title, True, (224, 228, 238)), (x + 11, y))
+
     def _draw_panel(self, panel: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, PANEL, panel)
         pygame.draw.line(self.screen, (68, 72, 84), panel.topleft, panel.bottomleft)
         x = panel.x + 14
-        self.screen.blit(self.font.render("INSPECTOR", True, (225, 229, 238)), (x, panel.y + 13))
+        pygame.draw.rect(self.screen, (27, 30, 38), (panel.x, panel.y, panel.width, 67))
+        pygame.draw.rect(self.screen, ACCENT, (panel.x, panel.y, 3, 67))
+        self.screen.blit(self.font.render("INSPECTOR", True, (235, 238, 245)), (x, panel.y + 13))
         map_label = f"{len(self.led_map.leds)} LEDs  •  {self.led_map.mapping_status.replace('_', ' ')}"
         self.screen.blit(self.small.render(map_label, True, (255, 178, 77)), (x, panel.y + 43))
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, panel.y + 66), (panel.right, panel.y + 66))
@@ -5078,7 +5147,7 @@ class Editor:
 
         y = panel.y + 76
         imported = self._active_imported_effect()
-        self.screen.blit(self.font.render("Firmware V4", True, (218, 222, 232)), (x, y))
+        self._draw_panel_section(x, y, "Firmware V4")
         y += 27
         if imported:
             summary = f"ID {imported.effect_id}  •  {imported.frame_ms} ms  •  {imported.actual_fps:.2f} FPS  •  ×{imported.loops}"
@@ -5112,7 +5181,7 @@ class Editor:
 
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 12
-        self.screen.blit(self.font.render("Layers", True, (218, 222, 232)), (x, y))
+        self._draw_panel_section(x, y, "Layers")
         self._button(pygame.Rect(panel.right - 190, y - 3, 34, 25), "canvas_layer", "C+", False)
         self._button(pygame.Rect(panel.right - 150, y - 3, 34, 25), "random_led_editor", "FX", False)
         self._button(pygame.Rect(panel.right - 110, y - 3, 28, 25), "duplicate_layer", "D", False)
@@ -5170,7 +5239,7 @@ class Editor:
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 13
         section_title = "Canvas control" if active_panel_layer.is_canvas else "Transform"
-        self.screen.blit(self.font.render(section_title, True, (218, 222, 232)), (x, y))
+        self._draw_panel_section(x, y, section_title)
         y += 31
         if self.selected:
             state = self.selected.state_at(self.current_ms)
@@ -5271,8 +5340,14 @@ class Editor:
             y += 28
             self.screen.blit(self.small.render("Drag a shape tool onto the playfield.", True, (116, 124, 142)), (x, y))
 
-        pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))
-        self.screen.blit(self.small.render(self.status[:42], True, (100, 216, 162)), (x, panel.bottom - 29))
+        pygame.draw.rect(self.screen, (22, 25, 32), (panel.x, panel.bottom - 47, panel.width, 47))
+        pygame.draw.line(
+            self.screen, (58, 64, 78),
+            (panel.x, panel.bottom - 47), (panel.right, panel.bottom - 47),
+        )
+        pygame.draw.circle(self.screen, (100, 216, 162), (x + 4, panel.bottom - 24), 4)
+        status_text = self._fit_text(self.status, self.small, panel.width - 43)
+        self.screen.blit(self.small.render(status_text, True, (171, 184, 204)), (x + 15, panel.bottom - 31))
 
     def _draw_random_led_panel(self, panel: pygame.Rect, x: int) -> None:
         effect = self._active_random_led_effect()
@@ -6100,10 +6175,31 @@ class Editor:
         return field
 
     def _button(self, rect: pygame.Rect, action: str, label: str, active: bool) -> None:
-        color = (77, 99, 150) if active else (49, 54, 68)
-        pygame.draw.rect(self.screen, color, rect, border_radius=4)
-        pygame.draw.rect(self.screen, (91, 98, 117), rect, 1, border_radius=4)
-        text = self.small.render(label, True, (245, 246, 250))
+        hovered = rect.collidepoint(pygame.mouse.get_pos())
+        action_base = action.split(":", 1)[0]
+        destructive = action_base in {"delete", "delete_layer", "export_bank_remove", "exit"}
+        if active:
+            fill = (65, 94, 154)
+            border = (112, 174, 255)
+        elif hovered and destructive:
+            fill = (93, 48, 52)
+            border = (255, 116, 108)
+        elif hovered:
+            fill = (61, 68, 86)
+            border = (126, 144, 176)
+        else:
+            fill = (45, 50, 63)
+            border = (78, 86, 104)
+        pygame.draw.rect(self.screen, (20, 23, 30), rect.move(0, 1), border_radius=4)
+        pygame.draw.rect(self.screen, fill, rect, border_radius=4)
+        pygame.draw.rect(self.screen, border, rect, 1, border_radius=4)
+        if active:
+            pygame.draw.line(
+                self.screen, (125, 190, 255),
+                (rect.x + 5, rect.bottom - 2), (rect.right - 5, rect.bottom - 2), 2,
+            )
+        ink = (255, 225, 222) if hovered and destructive else (245, 246, 250)
+        text = self.small.render(label, True, ink)
         self.screen.blit(text, text.get_rect(center=rect.center))
         self.buttons.append((rect, action, label))
 
