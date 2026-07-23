@@ -24,7 +24,7 @@ from .exporter import (
 )
 from .ledmap import Led, LedMap
 from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
-from .performance import recommended_preview_fps
+from .performance import is_raspberry_pi, recommended_preview_fps
 from .property_widgets import (
     LAYER_PROPERTY_SPECS,
     NumericPropertySpec,
@@ -162,11 +162,13 @@ class Editor:
         settings_path: str | Path = UI_SETTINGS_FILE,
         check_recovery: bool = True,
         target_fps: int | None = None,
+        safe_scaling: bool | None = None,
     ):
         self.screen = screen
         self.window_flags = pygame.FULLSCREEN if pygame.display.is_fullscreen() else pygame.RESIZABLE
         self.clock = pygame.time.Clock()
         self.target_fps = recommended_preview_fps(override=target_fps)
+        self.safe_scaling = is_raspberry_pi() if safe_scaling is None else safe_scaling
         self.font = pygame.font.Font(None, 22)
         self.small = pygame.font.Font(None, 18)
         self.title = pygame.font.Font(None, 30)
@@ -305,7 +307,7 @@ class Editor:
             guide_source = pygame.image.load(
                 str(ROOT / "assets" / "playfield_layout.png")
             ).convert_alpha()
-            guide_source = pygame.transform.smoothscale(guide_source, (2048, 990))
+            guide_source = self._scale_surface(guide_source, (2048, 990))
             guide_mask = pygame.mask.from_surface(guide_source, 40)
             guide = guide_mask.to_surface(
                 setcolor=(225, 229, 238, 215),
@@ -4233,9 +4235,17 @@ class Editor:
                 if source_rect == source.get_rect()
                 else source.subsurface(source_rect).copy()
             )
-            cached = pygame.transform.smoothscale(crop, visible.size).convert_alpha()
+            cached = self._scale_surface(crop, visible.size).convert_alpha()
             self._scaled_view_cache[key] = cached
         self.screen.blit(cached, visible)
+
+    def _scale_surface(
+        self, source: pygame.Surface, size: tuple[int, int],
+    ) -> pygame.Surface:
+        """Use the conservative scaler on Raspberry Pi's 32-bit ARM SDL stack."""
+        if self.safe_scaling:
+            return pygame.transform.scale(source, size)
+        return pygame.transform.smoothscale(source, size)
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -4462,8 +4472,8 @@ class Editor:
             line_width = draw_width if fill_mode == "stroke" else max(1, rect.height)
             pygame.draw.line(mask, color, (rect.left, rect.centery), (rect.right, rect.centery), line_width)
 
-    @staticmethod
     def _gradient_surface(
+        self,
         size: tuple[int, int], stops: list[GradientStop], gradient_type: str,
         radial_mode: str, angle: float, alpha: int,
     ) -> pygame.Surface:
@@ -4485,7 +4495,7 @@ class Editor:
                         (center[0] + math.cos(end) * radius, center[1] + math.sin(end) * radius),
                     ]
                     pygame.draw.polygon(square, (*sample_gradient(stops, amount), alpha), points)
-                return pygame.transform.smoothscale(square, size)
+                return self._scale_surface(square, size)
 
             result = pygame.Surface(size, pygame.SRCALPHA)
             result.fill((*sample_gradient(stops, 1.0), alpha))

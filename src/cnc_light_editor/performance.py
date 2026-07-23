@@ -14,6 +14,11 @@ def raspberry_pi_model(path: str | Path = PI_MODEL_PATH) -> str:
         return ""
 
 
+def is_raspberry_pi(*, model: str | None = None) -> bool:
+    detected = raspberry_pi_model() if model is None else model
+    return detected.startswith("Raspberry Pi")
+
+
 def recommended_preview_fps(
     *, override: str | int | None = None, model: str | None = None,
 ) -> int:
