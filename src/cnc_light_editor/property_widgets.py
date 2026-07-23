@@ -67,6 +67,8 @@ SHAPE_PROPERTY_SPECS = {
             "mask_expansion", "EXPAND", -0.1, 0.1, 0.00025, 1, 100.0, "%",
         ),
         NumericPropertySpec("stroke_width", "Stroke width", 0.001, 0.05, 0.00025, 1, 100.0),
+        NumericPropertySpec("wiggle_amplitude", "Wiggle amount", 0.0, 0.2, 0.0005, 1, 100.0, "%"),
+        NumericPropertySpec("wiggle_speed", "Wiggle speed", 0.1, 20.0, 0.02, 1, suffix=" Hz"),
     )
 }
 
@@ -88,6 +90,44 @@ RANDOM_LED_PROPERTY_SPECS = {
             suffix=" / sec", storage_decimals=1,
         ),
         NumericPropertySpec("particle_count", "Max active", 1.0, 68.0, 0.2, 0, integer=True),
+        NumericPropertySpec("opacity", "Opacity", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+    )
+}
+
+
+STROBE_PROPERTY_SPECS = {
+    spec.key: spec for spec in (
+        NumericPropertySpec("frequency_hz", "Frequency", 0.1, 30.0, 0.02, 1, suffix=" Hz"),
+        NumericPropertySpec("duty_cycle", "Duty cycle", 0.05, 0.95, 0.002, 1, 100.0, "%"),
+        NumericPropertySpec("opacity", "Opacity", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+    )
+}
+
+
+COLOR_CYCLE_PROPERTY_SPECS = {
+    spec.key: spec for spec in (
+        NumericPropertySpec("speed_hz", "Speed", 0.01, 5.0, 0.004, 2, suffix=" Hz"),
+        NumericPropertySpec("spread", "Rainbow spread", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+        NumericPropertySpec("saturation", "Saturation", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+        NumericPropertySpec("brightness", "Brightness", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+        NumericPropertySpec("opacity", "Opacity", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+    )
+}
+
+
+PULSE_PROPERTY_SPECS = {
+    spec.key: spec for spec in (
+        NumericPropertySpec("period_ms", "Period", 100.0, 10000.0, 5.0, 0, suffix=" ms", integer=True),
+        NumericPropertySpec("depth", "Depth", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+        NumericPropertySpec("opacity", "Opacity", 0.0, 1.0, 0.005, 1, 100.0, "%"),
+    )
+}
+
+
+COMET_PROPERTY_SPECS = {
+    spec.key: spec for spec in (
+        NumericPropertySpec("speed", "Speed", 0.5, 68.0, 0.05, 1, suffix=" led/s"),
+        NumericPropertySpec("trail_length", "Trail length", 1.0, 34.0, 0.05, 1, suffix=" leds"),
         NumericPropertySpec("opacity", "Opacity", 0.0, 1.0, 0.005, 1, 100.0, "%"),
     )
 }

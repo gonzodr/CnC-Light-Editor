@@ -78,6 +78,7 @@ def project_to_imported_effect(
         loop_frames=len(frames) if project.loop_frames == 0 else project.loop_frames,
         overlay=project.overlay,
         project_data=project.to_dict(),
+        intro_frames=project.normalized_intro_frames,
     )
 
 
@@ -115,6 +116,7 @@ def export_effect_bank(
         "  uint8_t loops;",
         "  uint16_t loopFrames;",
         "  uint8_t overlay;",
+        "  uint16_t introFrames;",
         "};",
     ]
     for effect, symbol in zip(effects, symbols):
@@ -138,14 +140,16 @@ def export_effect_bank(
     lines.extend([
         "",
         "const EffectDef bakedEffects[] = {",
-        "  // ID, name, data, frames, frameMs, loops, loopFrames, overlay",
+        "  // ID, name, data, frames, frameMs, loops, loopFrames, overlay, introFrames",
     ])
     for effect, symbol in zip(effects, symbols):
         escaped_name = effect.name.replace("\\", "\\\\").replace('"', '\\"')
         loop_frames = effect.normalized_loop_frames
+        intro_frames = effect.normalized_intro_frames
         lines.append(
             f'  {{ {effect.effect_id}, "{escaped_name}", {symbol}, {len(effect.frames)}, '
-            f"{effect.frame_ms}, {effect.loops}, {loop_frames}, {int(bool(effect.overlay))} }},"
+            f"{effect.frame_ms}, {effect.loops}, {loop_frames}, {int(bool(effect.overlay))}, "
+            f"{intro_frames} }},"
         )
     lines.extend([
         "};",
@@ -181,6 +185,9 @@ def _validate_effect_bank(effects: list[ImportedEffect], max_bytes: int | None) 
             raise ValueError(f"{effect.name}: loops must be between 1 and 255")
         if not 0 <= effect.loop_frames <= len(effect.frames):
             raise ValueError(f"{effect.name}: loopFrames must be between 0 and frames")
+        loop_end = len(effect.frames) if effect.loop_frames == 0 else effect.loop_frames
+        if not 0 <= effect.intro_frames <= loop_end:
+            raise ValueError(f"{effect.name}: introFrames must be between 0 and the loop end ({loop_end})")
         for frame in effect.frames:
             if len(frame) != FIRMWARE_LED_COUNT:
                 raise ValueError(f"{effect.name}: every frame must contain exactly 68 LEDs")
@@ -219,6 +226,9 @@ def _validate_metadata(project: Project, frames: int) -> None:
         raise ValueError("loops must be between 1 and 255")
     if not 0 <= project.loop_frames <= frames:
         raise ValueError(f"loopFrames must be between 0 and {frames}")
+    loop_end = frames if project.loop_frames == 0 else project.loop_frames
+    if not 0 <= project.intro_frames <= loop_end:
+        raise ValueError(f"introFrames must be between 0 and the loop end ({loop_end})")
 
 
 def _identifier(value: str) -> str:

@@ -3,18 +3,23 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import datetime
+from functools import lru_cache
 import math
 import os
 from pathlib import Path
 from queue import Empty, SimpleQueue
+import shutil
+import subprocess
 import sys
 import threading
+import traceback
 from uuid import uuid4
 
 import pygame
 
 from .autosave import AutosaveManager, RecoveryRecord
-from .engine import point_inside, render_leds, sample_gradient
+from .engine import noise_color, point_inside, render_leds, sample_gradient
 from .effect_bank import (
     SORT_MODES,
     describe_changes,
@@ -31,13 +36,28 @@ from .exporter import (
     project_to_imported_effect,
 )
 from .ledmap import Led, LedMap
-from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
+from .model import (
+    ColorCycleEffect,
+    CometEffect,
+    GradientStop,
+    Keyframe,
+    Layer,
+    Project,
+    PulseEffect,
+    RandomLedEffect,
+    Shape,
+    StrobeEffect,
+)
 from .performance import is_raspberry_pi, recommended_preview_fps
 from .property_widgets import (
+    COLOR_CYCLE_PROPERTY_SPECS,
+    COMET_PROPERTY_SPECS,
     LAYER_PROPERTY_SPECS,
     NumericPropertySpec,
+    PULSE_PROPERTY_SPECS,
     RANDOM_LED_PROPERTY_SPECS,
     SHAPE_PROPERTY_SPECS,
+    STROBE_PROPERTY_SPECS,
 )
 from .ui_settings import UiSettingsStore
 from .updater import GitUpdater, UpdateEvent
@@ -51,13 +71,17 @@ WINDOW_ICON = ROOT / "assets" / "CnC_LightE_ico.png"
 PALETTE = [
     (255, 70, 40), (255, 155, 20), (255, 230, 50), (80, 220, 90),
     (30, 180, 255), (90, 90, 255), (210, 80, 255), (255, 255, 255),
+    (255, 20, 110), (170, 255, 60), (30, 220, 190), (140, 90, 255),
+    (255, 120, 190), (255, 210, 130), (140, 140, 150), (0, 0, 0),
 ]
+CUSTOM_COLOR_CAP = 7  # + the "+" swatch fills out an 8-wide row, matching PALETTE's rows
 BANK_COLORS = [
     (74, 151, 255), (118, 92, 246), (224, 82, 151), (255, 126, 64),
     (244, 190, 55), (74, 198, 126), (48, 188, 202), (150, 104, 218),
 ]
 ACTION_TOOLTIPS = {
-    "play": "Space · Play or pause the animation",
+    "play": "Space · Play, looping the whole sequence",
+    "play_loop": "Shift+Space · Play, looping only the loop section",
     "keyframe": "K · Add a keyframe at the playhead",
     "stencil": "Preview the animation through the playfield artwork",
     "calibration": "Open LED Map calibration and firmware ID editing",
@@ -70,14 +94,96 @@ ACTION_TOOLTIPS = {
     "snap": "Snap timeline edits and the playhead to exact frame boundaries",
     "import_effect_data": "Import and preview effects from effect_data.h",
     "canvas_layer": "Add the keyframeable Canvas transparency layer",
-    "random_led_editor": "Add or edit a firmware-order Random LED effect",
+    "generator_menu_toggle": "Add or edit a firmware-order layer effect (Random LED, Strobe, Color Cycle, Pulse, Comet)",
     "duplicate_layer": "Ctrl+D · Duplicate the active layer",
     "delete_layer": "Delete the active layer",
     "layer": "Add a new shape layer",
     "gradient_editor": "Edit gradient colors, stops, direction and radial mode",
+    "toggle_wiggle": "Procedurally jitter this shape's position and rotation",
     "duplicate": "Ctrl+D · Duplicate the selected object",
     "delete": "Delete the selected object or keyframes",
 }
+
+
+@dataclass(frozen=True)
+class GeneratorKind:
+    """One entry per shape-independent, firmware-order layer effect generator.
+
+    Random LED and its four siblings (Strobe, Color Cycle, Pulse, Comet) are
+    all flat KeyframeMixin dataclasses with an enabled/opacity pair - this
+    table is what lets the FX menu, the Inspector panel and the generic
+    scrub/type-to-edit plumbing stay a single implementation shared by every
+    kind instead of five near-identical copies.
+    """
+
+    key: str
+    cls: type
+    list_attr: str
+    specs: dict
+    title: str
+    menu_label: str
+    description: tuple[str, ...]
+    param_props: tuple[str, ...]
+    has_color: bool = True
+    has_direction: bool = False
+    has_blackout: bool = False
+
+
+GENERATOR_KINDS: dict[str, GeneratorKind] = {
+    kind.key: kind for kind in (
+        GeneratorKind(
+            "random_led", RandomLedEffect, "effects", RANDOM_LED_PROPERTY_SPECS,
+            "RANDOM LED / SPARKLE", "Random LED / Sparkle",
+            (
+                "Directly flashes random firmware LEDs.",
+                "Layer shapes do not mask this effect.",
+            ),
+            ("seed", "life_ms", "born_speed", "particle_count"),
+        ),
+        GeneratorKind(
+            "strobe", StrobeEffect, "strobe_effects", STROBE_PROPERTY_SPECS,
+            "STROBE / FLASH", "Strobe / Flash",
+            (
+                "Flashes every firmware LED on and off at a fixed rate.",
+                "Layer shapes do not mask this effect.",
+            ),
+            ("frequency_hz", "duty_cycle"),
+            has_blackout=True,
+        ),
+        GeneratorKind(
+            "color_cycle", ColorCycleEffect, "color_cycle_effects", COLOR_CYCLE_PROPERTY_SPECS,
+            "COLOR CYCLE", "Color Cycle / Rainbow",
+            (
+                "Rotates a rainbow hue across every firmware LED.",
+                "Layer shapes do not mask this effect.",
+            ),
+            ("speed_hz", "spread", "saturation", "brightness"),
+            has_color=False, has_direction=True,
+        ),
+        GeneratorKind(
+            "pulse", PulseEffect, "pulse_effects", PULSE_PROPERTY_SPECS,
+            "PULSE / BREATHE", "Pulse / Breathe",
+            (
+                "Breathes every firmware LED's brightness up and down.",
+                "Layer shapes do not mask this effect.",
+            ),
+            ("period_ms", "depth"),
+        ),
+        GeneratorKind(
+            "comet", CometEffect, "comet_effects", COMET_PROPERTY_SPECS,
+            "COMET / CHASE", "Comet / Chase",
+            (
+                "Runs a fading light along the firmware LED order.",
+                "Layer shapes do not mask this effect.",
+            ),
+            ("speed", "trail_length"),
+            has_direction=True,
+        ),
+    )
+}
+GENERATOR_EDITOR_ACTIONS = {f"{key}_editor" for key in GENERATOR_KINDS}
+
+
 HELP_COLUMNS = (
     (
         ("PROJECT", (
@@ -91,7 +197,8 @@ HELP_COLUMNS = (
             ("Ctrl + Shift + Z", "Redo"),
         )),
         ("TIMELINE / KEYFRAMES", (
-            ("Space", "Play / pause"),
+            ("Space", "Play / pause, looping the whole sequence"),
+            ("Shift + Space", "Play / pause, looping only the loop section"),
             ("|<  /  >|", "Step exactly one frame"),
             ("K", "Add keyframe at playhead"),
             ("V", "Toggle shape or Canvas state"),
@@ -129,6 +236,7 @@ HELP_COLUMNS = (
             ("Left", "Previous LED position"),
             ("+  /  -", "Step firmware LED ID"),
             ("Ctrl + S", "Save LED map while LED map is open"),
+            ("Ctrl + Z / Shift+Z", "Undo / redo LED map edits (own history)"),
             ("Esc", "Cancel LED movement"),
         )),
     ),
@@ -148,6 +256,9 @@ DEFAULT_WINDOW_SIZE = (1280, 1024)
 MIN_WINDOW_SIZE = (1024, 720)
 AUTOSAVE_INTERVAL_MS = 30_000
 UI_SETTINGS_FILE = ROOT / "projects" / ".editor_settings.json"
+CRASH_LOG_FILE = ROOT / "projects" / "crash.log"
+CRASH_LOG_MAX_ENTRIES = 20
+_CRASH_LOG_SEPARATOR = "=" * 70 + "\n"
 ACCENT = (77, 148, 255)
 PANEL = (31, 34, 42)
 PANEL_DARK = (24, 26, 33)
@@ -199,6 +310,10 @@ class Editor:
         self.clock = pygame.time.Clock()
         self.target_fps = recommended_preview_fps(override=target_fps)
         self.safe_scaling = is_raspberry_pi() if safe_scaling is None else safe_scaling
+        # Looked up once (shells out to git) - shown in the Help panel so
+        # it's always clear exactly which commit is running, since the
+        # auto-updater can move a Pi to a new one at any restart.
+        self.git_commit = get_git_commit()
         self.font = pygame.font.Font(None, 22)
         self.small = pygame.font.Font(None, 18)
         self.title = pygame.font.Font(None, 30)
@@ -211,6 +326,13 @@ class Editor:
         self.timeline_height = self._clamp_timeline_height(
             self.ui_settings.get("timeline_height", DEFAULT_TIMELINE_HEIGHT)
         )
+        # A personal palette shared across all projects (like the built-in
+        # PALETTE, but user-mixed) - bounded so it never grows unbounded.
+        self.custom_colors: list[tuple[int, int, int]] = [
+            tuple(color) for color in self.ui_settings.get("custom_colors", [])
+        ][-CUSTOM_COLOR_CAP:]
+        self.color_picker_open = False
+        self.color_picker_rgb: list[int] = [255, 255, 255]
         self.autosave_interval_ms = AUTOSAVE_INTERVAL_MS
         self.last_autosave_tick = pygame.time.get_ticks()
         self.recovery_record: RecoveryRecord | None = (
@@ -220,6 +342,7 @@ class Editor:
         self.last_window_caption = ""
         self.current_ms = 0
         self.playing = False
+        self.loop_playback = False
         self.stencil = False
         self.calibration = False
         self.selected_led_id = 0
@@ -239,6 +362,12 @@ class Editor:
         self.gradient_editor_open = False
         self.selected_gradient_stop_id: str | None = None
         self.random_led_editor_open = False
+        self.strobe_editor_open = False
+        self.color_cycle_editor_open = False
+        self.pulse_editor_open = False
+        self.comet_editor_open = False
+        self.generator_menu_open = False
+        self._generator_menu_anchor: pygame.Rect | None = None
         self.random_effect_editing: str | None = None
         self.random_effect_input = ""
         self.random_effect_input_select_all = False
@@ -264,6 +393,12 @@ class Editor:
         self.export_bank_sort_mode = "id"
         self.export_bank_query = ""
         self.export_bank_query_editing = False
+        # (frames id, effect id, size) -> rendered thumbnail. Keyed off the
+        # frames list's own identity, which dataclasses.replace() (renaming/
+        # re-IDing an effect) does not change, so edits that only touch the
+        # name/ID keep their cached thumbnail; a fresh map/import gets a new
+        # frames list and so a fresh (uncached) one.
+        self._effect_thumbnail_cache: dict[tuple, pygame.Surface] = {}
         self.file_browser_open = False
         self.file_browser_mode = "open"
         self.file_browser_purpose = ""
@@ -316,6 +451,8 @@ class Editor:
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
         self.timeline_layer_scroll = 0
+        self.inspector_scroll = 0
+        self.inspector_max_scroll = 0
         self.timeline_expanded_layers: set[str] = set()
         self.timeline_selected_layer_id: str | None = None
         self.timeline_mode = "dope"
@@ -327,6 +464,12 @@ class Editor:
         self.undo_stack: list[Project] = []
         self.redo_stack: list[Project] = []
         self.change_snapshot: Project | None = None
+        # LED map edits get their OWN undo/redo history, separate from the
+        # project's - Ctrl+Z/Ctrl+Shift+Z route to this stack instead while
+        # LED map (calibration) mode is open (see _handle_key).
+        self.led_map_undo_stack: list[LedMap] = []
+        self.led_map_redo_stack: list[LedMap] = []
+        self.led_map_change_snapshot: LedMap | None = None
         self.status = "Ready — 59 playfield LEDs"
         self.buttons: list[tuple[pygame.Rect, str, str]] = []
         self.led_map_path = ROOT / "data" / "led_map.json"
@@ -351,6 +494,7 @@ class Editor:
         self.layout_guide = Editor._cached_layout_guide
         self._sync_led_fields()
         self._add_demo_shape()
+        self._load_remembered_effect_bank_header()
 
     def _add_demo_shape(self) -> None:
         shape = Shape("ellipse", "Pulse", x=0.5, y=0.45, width=0.08, height=0.08, color=(255, 90, 20))
@@ -384,7 +528,15 @@ class Editor:
                     self.handle_event(event)
             update_changed = self._poll_update_events()
             if self.playing:
-                self.current_ms = (self.current_ms + dt) % max(1, self._playback_duration())
+                if self.loop_playback:
+                    start_ms, end_ms = self._loop_section_bounds()
+                    span = max(1.0, end_ms - start_ms)
+                    if not start_ms <= self.current_ms < end_ms:
+                        self.current_ms = start_ms
+                    self.current_ms = start_ms + (self.current_ms - start_ms + dt) % span
+                else:
+                    duration = max(1, self._playback_duration())
+                    self.current_ms = (self.current_ms + dt) % duration
             autosaved = self._maybe_autosave()
             if (
                 redraw_requested
@@ -526,6 +678,10 @@ class Editor:
             self._handle_file_browser_event(event)
             return
 
+        if self.color_picker_open:
+            self._handle_color_picker_event(event)
+            return
+
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
             self.help_open = not self.help_open
             if self.help_open:
@@ -579,9 +735,9 @@ class Editor:
                 self.drag_mode = None
                 self.status = "Closed gradient editor"
                 return
-            if event.key == pygame.K_ESCAPE and self.random_led_editor_open:
-                self.random_led_editor_open = False
-                self.status = "Closed Random LED editor"
+            if event.key == pygame.K_ESCAPE and self._active_generator_panel_kind():
+                self._close_generator_panels()
+                self.status = "Closed effect editor"
                 return
             self._handle_key(event)
             return
@@ -595,6 +751,16 @@ class Editor:
                 if action:
                     self._apply_keyframe_context(action)
                 self.context_menu_pos = None
+                return
+            if event.button == 1 and self.generator_menu_open:
+                action = next(
+                    (action for rect, action, _ in reversed(self.buttons) if rect.collidepoint(event.pos)),
+                    None,
+                )
+                if action in GENERATOR_EDITOR_ACTIONS:
+                    self._action(action)
+                else:
+                    self.generator_menu_open = False
                 return
             if event.button == 1 and self.property_editing:
                 self.property_editing = None
@@ -662,6 +828,16 @@ class Editor:
                         self.drag_origin = event.pos
                         self._begin_change()
                         self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
+                    elif action == "loop_bracket_handle":
+                        self.drag_mode = "loop_bracket"
+                        self.drag_origin = event.pos
+                        self._begin_change()
+                        self._set_loop_boundary_from_x(event.pos[0], timeline)
+                    elif action == "intro_bracket_handle":
+                        self.drag_mode = "intro_bracket"
+                        self.drag_origin = event.pos
+                        self._begin_change()
+                        self._set_intro_boundary_from_x(event.pos[0], timeline)
                     elif action == "timeline_resize_handle":
                         if getattr(event, "clicks", 1) >= 2:
                             self.timeline_height = self._clamp_timeline_height(
@@ -688,14 +864,15 @@ class Editor:
                         self.drag_origin = event.pos
                         self.drag_shape_state = dict(self.selected.state_at(self.current_ms))
                         self._begin_change()
-                    elif action.startswith("random_led_field:"):
-                        effect = self._active_random_led_effect()
+                    elif action.startswith("generator_field:"):
+                        kind = self._active_generator_panel_kind()
+                        effect = self._active_generator_effect(kind) if kind else None
                         if effect:
                             prop = action.split(":", 1)[1]
                             self.random_effect_editing = None
                             self.random_effect_input_select_all = False
                             self.scrub_prop = prop
-                            self.drag_mode = "random_led_scrub"
+                            self.drag_mode = "generator_scrub"
                             self.drag_origin = event.pos
                             self.random_effect_drag_start = self._random_effect_parameter_value(
                                 effect, prop, self.current_ms,
@@ -837,7 +1014,7 @@ class Editor:
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
                 open_random_effect_input = (
-                    self.drag_mode == "random_led_scrub"
+                    self.drag_mode == "generator_scrub"
                     and self.scrub_prop is not None
                     and pygame.Vector2(event.pos).distance_to(self.drag_origin) < 4
                 )
@@ -890,6 +1067,10 @@ class Editor:
                 self.keyframe_marquee_current = event.pos
             elif self.drag_mode == "duration":
                 self._set_duration_from_x(event.pos[0], self._duration_slider_rect(timeline))
+            elif self.drag_mode == "loop_bracket":
+                self._set_loop_boundary_from_x(event.pos[0], timeline)
+            elif self.drag_mode == "intro_bracket":
+                self._set_intro_boundary_from_x(event.pos[0], timeline)
             elif self.drag_mode == "timeline_resize":
                 self.timeline_height = self._clamp_timeline_height(
                     self.screen.get_height() - event.pos[1]
@@ -899,7 +1080,7 @@ class Editor:
                 self._move_selected_led(event.pos, canvas)
             elif self.drag_mode == "scrub":
                 self._scrub_property(event.pos[0])
-            elif self.drag_mode == "random_led_scrub":
+            elif self.drag_mode == "generator_scrub":
                 self._scrub_random_effect_parameter(event.pos[0])
             elif self.drag_mode == "layer_opacity_scrub":
                 self._scrub_layer_opacity(event.pos[0])
@@ -937,6 +1118,10 @@ class Editor:
                 new_screen = self._world_to_screen(old_point, new_canvas)
                 self.pan += pygame.Vector2(anchor) - pygame.Vector2(new_screen)
                 self._clamp_canvas_pan(viewport)
+            elif panel.collidepoint(mouse):
+                self.inspector_scroll = max(
+                    0, min(self.inspector_max_scroll, self.inspector_scroll - event.y * 40),
+                )
 
     def _clamp_timeline_height(self, value: object) -> int:
         try:
@@ -962,10 +1147,13 @@ class Editor:
         ctrl = bool(modifiers & pygame.KMOD_CTRL)
         shift = bool(modifiers & pygame.KMOD_SHIFT)
         if ctrl and event.key == pygame.K_z:
-            self._redo() if shift else self._undo()
+            if self.calibration:
+                self._redo_led_map() if shift else self._undo_led_map()
+            else:
+                self._redo() if shift else self._undo()
             return
         if ctrl and event.key == pygame.K_y:
-            self._redo()
+            self._redo_led_map() if self.calibration else self._redo()
             return
         if ctrl and event.key == pygame.K_d:
             self._action("duplicate_layer")
@@ -984,7 +1172,7 @@ class Editor:
             return
         if event.key == pygame.K_SPACE:
             if not getattr(event, "repeat", False):
-                self._toggle_playback()
+                self._toggle_loop_playback() if shift else self._toggle_playback()
             return
         if self.calibration:
             if event.key == pygame.K_ESCAPE and self.drag_mode == "led_move":
@@ -1068,19 +1256,18 @@ class Editor:
                 return
         mutating = (
             action.startswith((
-                "add:", "color:", "fill_mode:", "gradient_type:",
+                "add:", "color:", "custom_color:", "fill_mode:", "gradient_type:",
                 "gradient_radial_mode:", "toggle_layer:", "toggle_layer_lock:",
                 "canvas_state:",
             ))
             or action in {
                 "layer", "canvas_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
-                "set_loop_end", "clear_loop_end", "toggle_overlay",
+                "clear_loop_end", "toggle_overlay",
                 "gradient_add_stop", "gradient_delete_stop",
-                "random_led_toggle", "random_led_keyframe", "random_led_opacity_keyframe",
-                "random_led_seed:-1", "random_led_seed:1",
-                "random_led_life:-50", "random_led_life:50", "random_led_birth:-1", "random_led_birth:1",
-                "random_led_count:-1", "random_led_count:1", "random_led_delete",
+                "generator_toggle", "generator_keyframe", "generator_opacity_keyframe",
+                "generator_toggle_direction", "generator_toggle_blackout",
+                "generator_delete", "toggle_wiggle",
             }
         )
         if mutating:
@@ -1107,7 +1294,7 @@ class Editor:
                 self.active_layer = existing
                 self.timeline_selected_layer_id = None
                 self.selected = None
-                self.random_led_editor_open = False
+                self._close_generator_panels()
                 self.timeline_expanded_layers.add(self.project.layers[existing].id)
                 self.status = "The project already has a Canvas layer"
             else:
@@ -1118,7 +1305,7 @@ class Editor:
                 self.active_layer = len(self.project.layers) - 1
                 self.timeline_selected_layer_id = None
                 self.selected = None
-                self.random_led_editor_open = False
+                self._close_generator_panels()
                 self.selected_keyframes = {(canvas_layer.id, "canvas_enabled", 0)}
                 self.timeline_expanded_layers.add(canvas_layer.id)
                 self._ensure_active_layer_visible()
@@ -1134,7 +1321,7 @@ class Editor:
                 clone.name = f"{source.name} copy"
                 for shape in clone.shapes:
                     shape.id = uuid4().hex[:10]
-                for effect in clone.effects:
+                for effect in self._layer_generator_effects(clone):
                     effect.id = uuid4().hex[:10]
                 self.project.layers.insert(self.active_layer + 1, clone)
                 self.active_layer += 1
@@ -1215,6 +1402,8 @@ class Editor:
             self.selected = None
         elif action == "play":
             self._toggle_playback()
+        elif action == "play_loop":
+            self._toggle_loop_playback()
         elif action.startswith("step_frame:"):
             self._step_frame(int(action.split(":", 1)[1]))
         elif action == "snap":
@@ -1241,49 +1430,57 @@ class Editor:
                 ]
                 self._commit_change()
             self.gradient_editor_open = True
-            self.random_led_editor_open = False
+            self._close_generator_panels()
             self.selected_gradient_stop_id = self.selected.gradient_stops[0].id
             self.status = "Gradient editor — click the bar to add a color stop"
         elif action == "gradient_back":
             self.gradient_editor_open = False
             self.drag_mode = None
             self.status = "Gradient changes applied"
-        elif action == "random_led_editor":
+        elif action == "generator_menu_toggle":
+            self.generator_menu_open = not self.generator_menu_open
+        elif action in GENERATOR_EDITOR_ACTIONS:
+            kind = action[: -len("_editor")]
+            info = GENERATOR_KINDS[kind]
+            self.generator_menu_open = False
             if self.project.layers[self.active_layer].is_canvas:
-                self.status = "Select a regular layer before adding a Random LED effect"
+                self.status = f"Select a regular layer before adding a {info.menu_label} effect"
                 if mutating:
                     self._commit_change()
                 return
-            effect = self._active_random_led_effect()
+            effect = self._active_generator_effect(kind)
             if effect is None:
                 self._begin_change()
-                effect = RandomLedEffect()
-                self.project.layers[self.active_layer].effects.append(effect)
+                effect = info.cls()
+                getattr(self.project.layers[self.active_layer], info.list_attr).append(effect)
                 self._commit_change()
-            self.random_led_editor_open = True
+            self._close_generator_panels()
+            setattr(self, f"{kind}_editor_open", True)
             self.random_effect_editing = None
             self.random_effect_input_select_all = False
             self.gradient_editor_open = False
             self.selected_keyframes.clear()
-            self.status = "Random LED — deterministic flashes independent from layer shapes"
-        elif action == "random_led_back":
-            self.random_led_editor_open = False
+            self.status = f"{info.menu_label} — {info.description[0]}"
+        elif action == "generator_back":
+            self._close_generator_panels()
             self.random_effect_editing = None
             self.random_effect_input_select_all = False
-            self.status = "Random LED changes applied"
-        elif action == "random_led_delete":
-            effect = self._active_random_led_effect()
-            if effect:
-                self.project.layers[self.active_layer].effects.remove(effect)
+            self.status = "Effect changes applied"
+        elif action == "generator_delete":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
+            if effect and kind:
+                getattr(self.project.layers[self.active_layer], GENERATOR_KINDS[kind].list_attr).remove(effect)
                 self.selected_keyframes = {
                     key for key in self.selected_keyframes if key[0] != effect.id
                 }
-            self.random_led_editor_open = False
+            self._close_generator_panels()
             self.random_effect_editing = None
             self.random_effect_input_select_all = False
-            self.status = "Random LED effect removed from layer"
-        elif action == "random_led_toggle":
-            effect = self._active_random_led_effect()
+            self.status = "Effect removed from layer"
+        elif action == "generator_toggle":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
             if effect:
                 value = not bool(effect.value_at("enabled", self.current_ms))
                 if self.current_ms == 0 and not effect.keyframes.get("enabled"):
@@ -1291,38 +1488,43 @@ class Editor:
                 else:
                     effect.add_keyframe("enabled", self.current_ms, value)
                     self.selected_keyframes = {(effect.id, "enabled", self.current_ms)}
-                self.status = f"Random LED {'enabled' if value else 'disabled'} at {self.current_ms} ms"
-        elif action == "random_led_keyframe":
-            effect = self._active_random_led_effect()
+                self.status = f"Effect {'enabled' if value else 'disabled'} at {self.current_ms} ms"
+        elif action == "generator_keyframe":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
             if effect:
                 value = bool(effect.value_at("enabled", self.current_ms))
                 effect.add_keyframe("enabled", self.current_ms, value)
                 self.selected_keyframes = {(effect.id, "enabled", self.current_ms)}
-                self.status = f"Random LED enabled keyframe at {self.current_ms} ms"
-        elif action == "random_led_opacity_keyframe":
-            effect = self._active_random_led_effect()
+                self.status = f"Enabled keyframe at {self.current_ms} ms"
+        elif action == "generator_opacity_keyframe":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
             if effect:
                 value = float(effect.value_at("opacity", self.current_ms))
                 effect.add_keyframe("opacity", self.current_ms, value)
                 self.selected_keyframes = {(effect.id, "opacity", self.current_ms)}
                 self.timeline_expanded_layers.add(self.project.layers[self.active_layer].id)
-                self.status = f"Random LED opacity keyframe at {self.current_ms} ms"
-        elif action.startswith("random_led_seed:"):
-            effect = self._active_random_led_effect()
-            if effect:
-                effect.seed = max(0, min(2147483647, effect.seed + int(action.split(":", 1)[1])))
-        elif action.startswith("random_led_life:"):
-            effect = self._active_random_led_effect()
-            if effect:
-                effect.life_ms = max(50, min(10000, effect.life_ms + int(action.split(":", 1)[1])))
-        elif action.startswith("random_led_birth:"):
-            effect = self._active_random_led_effect()
-            if effect:
-                effect.born_speed = round(max(0.5, min(100.0, effect.born_speed + float(action.split(":", 1)[1]))), 1)
-        elif action.startswith("random_led_count:"):
-            effect = self._active_random_led_effect()
-            if effect:
-                effect.particle_count = max(1, min(68, effect.particle_count + int(action.split(":", 1)[1])))
+                self.status = f"Opacity keyframe at {self.current_ms} ms"
+        elif action == "generator_toggle_direction":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
+            if effect is not None and hasattr(effect, "direction"):
+                effect.direction = -1 if effect.direction >= 0 else 1
+                self.status = f"Direction: {'reverse' if effect.direction < 0 else 'forward'}"
+        elif action == "generator_toggle_blackout":
+            kind = self._active_generator_panel_kind()
+            effect = self._active_generator_effect(kind) if kind else None
+            if effect is not None and hasattr(effect, "blackout"):
+                effect.blackout = not effect.blackout
+                self.status = (
+                    "Strobe cuts to black, interrupting the animation underneath"
+                    if effect.blackout else "Strobe flashes its own color"
+                )
+        elif action == "toggle_wiggle" and self.selected:
+            enabled = bool(self.selected.state_at(self.current_ms)["wiggle_enabled"])
+            self._set_animated("wiggle_enabled", not enabled)
+            self.status = f"Wiggle {'enabled' if not enabled else 'disabled'}"
         elif action.startswith("gradient_type:") and self.selected:
             gradient_type = action.split(":", 1)[1]
             self._set_animated("gradient_type", gradient_type)
@@ -1366,16 +1568,6 @@ class Editor:
             delta = int(action.split(":", 1)[1])
             self.project.loops = max(1, min(255, self.project.loops + delta))
             self.status = f"Loop count: {self.project.loops}"
-        elif action == "set_loop_end":
-            boundary = min(
-                self.project.stored_frame_count,
-                max(1, math.floor(self.current_ms / max(1, self.project.frame_ms or 1)) + 1),
-            )
-            self.project.loop_frames = 0 if boundary >= self.project.stored_frame_count else boundary
-            self.status = (
-                "Loop uses the full effect"
-                if self.project.loop_frames == 0 else f"Loop ends after frame {self.project.loop_frames - 1}"
-            )
         elif action == "clear_loop_end":
             self.project.loop_frames = 0
             self.status = "Loop uses the full effect — no separate outro"
@@ -1441,6 +1633,7 @@ class Editor:
         elif action.startswith("led_index:"):
             self._step_firmware_index(int(action.split(":")[1]))
         elif action == "save_map":
+            self._begin_led_change()
             if self.led_id_editing and self.led_id_input:
                 target = int(self.led_id_input)
                 if 0 <= target < len(self.led_map.leds):
@@ -1451,6 +1644,7 @@ class Editor:
                 self.led_name_editing = False
             self.led_map.mapping_status = "calibration_in_progress"
             self._sync_led_fields()
+            self._commit_led_change()
             self.led_map.save(self.led_map_path)
             self.status = "LED map IDs and names saved"
         elif action == "map_verified":
@@ -1461,43 +1655,26 @@ class Editor:
                 self.led_map.mapping_status = "hardware_verified"
                 self.led_map.save(self.led_map_path)
                 self.status = "LED map marked as hardware verified"
-        elif action.startswith("color:") and (self.selected or self.random_led_editor_open):
-            color = PALETTE[int(action.split(":")[1])]
-            if self.random_led_editor_open:
-                effect = self._active_random_led_effect()
-                if effect:
-                    effect.color = color
-                    self.status = f"Random LED color: RGB {color}"
-                if mutating:
-                    self._commit_change()
-                return
-            assert self.selected is not None
-            if self.gradient_editor_open and self.selected_gradient_stop_id:
+        elif action.startswith("color:") and (self.selected or self._active_generator_panel_kind()):
+            self._apply_color(PALETTE[int(action.split(":", 1)[1])])
+        elif action.startswith("custom_color:") and (self.selected or self._active_generator_panel_kind()):
+            index = int(action.split(":", 1)[1])
+            if 0 <= index < len(self.custom_colors):
+                self._apply_color(tuple(self.custom_colors[index]))
+        elif action == "open_color_picker":
+            panel_kind = self._active_generator_panel_kind()
+            if panel_kind:
+                effect = self._active_generator_effect(panel_kind)
+                current = getattr(effect, "color", (255, 255, 255)) if effect else (255, 255, 255)
+            elif self.gradient_editor_open and self.selected_gradient_stop_id:
                 stop = self._selected_gradient_stop()
-                if stop:
-                    stop.color = color
-                    self.status = f"Gradient stop color: RGB {color}"
-                if mutating:
-                    self._commit_change()
-                return
-            selected_shape_times: dict[str, set[int]] = {}
-            for target_id, _prop, time_ms in self.selected_keyframes:
-                target = self._find_keyframe_target(target_id)
-                if isinstance(target, Shape):
-                    selected_shape_times.setdefault(target_id, set()).add(time_ms)
-            if selected_shape_times:
-                changed = 0
-                for target_id, times in selected_shape_times.items():
-                    target = self._find_keyframe_target(target_id)
-                    if not isinstance(target, Shape):
-                        continue
-                    for time_ms in sorted(times):
-                        target.add_keyframe("color", time_ms, color)
-                        self.selected_keyframes.add((target.id, "color", time_ms))
-                        changed += 1
-                self.status = f"Color applied to {changed} selected keyframes"
+                current = stop.color if stop else (255, 255, 255)
+            elif self.selected:
+                current = tuple(self.selected.state_at(self.current_ms)["color"])
             else:
-                self._set_animated("color", color)
+                current = (255, 255, 255)
+            self.color_picker_rgb = list(current)
+            self.color_picker_open = True
         elif action.startswith("fill_mode:") and self.selected:
             self._set_animated("fill_mode", action.split(":", 1)[1])
         elif action.startswith("toggle_timeline_layer:"):
@@ -1519,7 +1696,7 @@ class Editor:
             layer_index = next(
                 (
                     index for index, layer in enumerate(self.project.layers)
-                    if target is layer or target in [*layer.shapes, *layer.effects]
+                    if target is layer or target in [*layer.shapes, *self._layer_generator_effects(layer)]
                 ),
                 None,
             )
@@ -1527,15 +1704,16 @@ class Editor:
                 self.active_layer = layer_index
                 self.timeline_selected_layer_id = None
                 self.gradient_editor_open = False
+                self._close_generator_panels()
                 if isinstance(target, Shape):
                     self.selected = target
-                    self.random_led_editor_open = False
                 elif isinstance(target, Layer):
                     self.selected = None
-                    self.random_led_editor_open = False
                 else:
                     self.selected = None
-                    self.random_led_editor_open = True
+                    generator_kind = self._generator_kind_of(target)
+                    if generator_kind:
+                        setattr(self, f"{generator_kind}_editor_open", True)
                 self.selected_keyframes.clear()
                 if isinstance(target, Shape) and prop in GRAPH_NUMERIC_PROPERTIES:
                     self.graph_target_id = target.id
@@ -1551,7 +1729,7 @@ class Editor:
             layer = self.project.layers[self.active_layer]
             self.timeline_selected_layer_id = layer.id
             self.selected = None
-            self.random_led_editor_open = False
+            self._close_generator_panels()
             self.selected_keyframes.clear()
             self.status = f"Selected layer: {layer.name} — Delete removes the layer"
             self._ensure_active_layer_visible()
@@ -1578,11 +1756,14 @@ class Editor:
             if layer.locked:
                 if self.selected in layer.shapes:
                     self.selected = None
-                target_ids = {layer.id, *(shape.id for shape in layer.shapes), *(effect.id for effect in layer.effects)}
+                target_ids = {
+                    layer.id, *(shape.id for shape in layer.shapes),
+                    *(effect.id for effect in self._layer_generator_effects(layer)),
+                }
                 self.selected_keyframes = {
                     key for key in self.selected_keyframes if key[0] not in target_ids
                 }
-                self.random_led_editor_open = False
+                self._close_generator_panels()
             self.status = f"Layer {layer.name}: {'LOCKED' if layer.locked else 'UNLOCKED'}"
         if mutating:
             self._commit_change()
@@ -1594,11 +1775,13 @@ class Editor:
             "gradient_radial_mode:", "canvas_state:",
         )):
             return True
+        if action in GENERATOR_EDITOR_ACTIONS:
+            return True
         return action in {
             "delete_layer", "delete", "duplicate", "keyframe",
             "gradient_editor", "gradient_add_stop", "gradient_delete_stop",
-            "random_led_editor", "random_led_toggle", "random_led_keyframe",
-            "random_led_opacity_keyframe", "random_led_delete",
+            "generator_toggle", "generator_keyframe",
+            "generator_opacity_keyframe", "generator_delete", "toggle_wiggle",
         }
 
     def _begin_change(self) -> None:
@@ -1653,6 +1836,44 @@ class Editor:
         self.undo_stack.append(deepcopy(self.project))
         self._restore_project(self.redo_stack.pop())
         self.status = "Redo"
+
+    def _begin_led_change(self) -> None:
+        if self.led_map_change_snapshot is None:
+            self.led_map_change_snapshot = deepcopy(self.led_map)
+
+    def _commit_led_change(self) -> None:
+        if self.led_map_change_snapshot is None:
+            return
+        if self.led_map_change_snapshot != self.led_map:
+            self.led_map_undo_stack.append(self.led_map_change_snapshot)
+            self.led_map_undo_stack = self.led_map_undo_stack[-100:]
+            self.led_map_redo_stack.clear()
+        self.led_map_change_snapshot = None
+
+    def _restore_led_map(self, led_map: LedMap) -> None:
+        self.led_map = deepcopy(led_map)
+        self.led_points = self.led_map.normalized_points()
+        if not any(led.id == self.selected_led_id for led in self.led_map.leds):
+            self.selected_led_id = self.led_map.leds[0].id
+        self.led_id_editing = False
+        self.led_name_editing = False
+        self._sync_led_fields()
+
+    def _undo_led_map(self) -> None:
+        if not self.led_map_undo_stack:
+            self.status = "Nothing to undo in the LED map"
+            return
+        self.led_map_redo_stack.append(deepcopy(self.led_map))
+        self._restore_led_map(self.led_map_undo_stack.pop())
+        self.status = "LED map: Undo"
+
+    def _redo_led_map(self) -> None:
+        if not self.led_map_redo_stack:
+            self.status = "Nothing to redo in the LED map"
+            return
+        self.led_map_undo_stack.append(deepcopy(self.led_map))
+        self._restore_led_map(self.led_map_redo_stack.pop())
+        self.status = "LED map: Redo"
 
     def _create_shape(
         self, kind: str, point: tuple[float, float], history: bool = True
@@ -1806,7 +2027,9 @@ class Editor:
 
     @staticmethod
     def _layer_keyframe_targets(layer: Layer) -> list[Layer | Shape | RandomLedEffect]:
-        return [layer] if layer.is_canvas else [*layer.shapes, *layer.effects]
+        if layer.is_canvas:
+            return [layer]
+        return [*layer.shapes, *Editor._layer_generator_effects(layer)]
 
     def _timeline_row_target(self, row: TimelineRow) -> Layer | Shape | RandomLedEffect | None:
         return self._find_keyframe_target(row.target_id) if row.target_id else None
@@ -2175,13 +2398,36 @@ class Editor:
             self.timeline_layer_scroll = active_row - capacity + 1
         self._clamp_timeline_layer_scroll(timeline)
 
-    def _duration_slider_rect(self, _timeline: pygame.Rect | None = None) -> pygame.Rect:
-        right_edge = self.screen.get_width() - INSPECTOR_WIDTH
-        return pygame.Rect(right_edge - 94, 19, 78, 16)
+    def _timeline_keyframe_button_rect(self, timeline: pygame.Rect) -> pygame.Rect:
+        """+ Keyframe button rect - right after the transport buttons
+        (prev/play/next/loop end at timeline.x + 328), same row as play."""
+        label_width = self.small.size("+ Keyframe")[0]
+        width = max(90, label_width + 20)
+        return pygame.Rect(timeline.x + 328 + 10, timeline.y + 5, width, 25)
 
-    def _duration_input_rect(self) -> pygame.Rect:
-        right_edge = self.screen.get_width() - INSPECTOR_WIDTH
-        return pygame.Rect(right_edge - 174, 11, 68, 32)
+    def _timeline_duration_area_x(self, timeline: pygame.Rect) -> int:
+        """Left edge for the Length label + input + slider cluster - right
+        after the + Keyframe button, so it sits in the same row/line as the
+        play button too."""
+        return self._timeline_keyframe_button_rect(timeline).right + 14
+
+    def _duration_input_rect(self, timeline: pygame.Rect) -> pygame.Rect:
+        label_width = self.small.size("Length")[0]
+        x = self._timeline_duration_area_x(timeline) + label_width + 5
+        # y = timeline.y + 9, not +5 like the transport buttons: the resize
+        # handle strip covers timeline.y .. timeline.y + 8 (full width), and
+        # this field's clickable rect must clear it entirely (unlike the
+        # transport buttons, its slider sibling's hit-box is inflated and
+        # would otherwise reach back into that strip - see _duration_slider_rect).
+        return pygame.Rect(x, timeline.y + 9, 64, 25)
+
+    def _duration_slider_rect(self, timeline: pygame.Rect) -> pygame.Rect:
+        input_rect = self._duration_input_rect(timeline)
+        # y = timeline.y + 16: its clickable hit-box is this rect inflated by
+        # 14px vertically (see _draw_timeline), so the bar itself must sit low
+        # enough that even the inflated box (from timeline.y + 9) still clears
+        # the resize handle strip (timeline.y .. timeline.y + 8).
+        return pygame.Rect(input_rect.right + 8, timeline.y + 16, 78, 16)
 
     def _gradient_bar_rect(self) -> pygame.Rect:
         panel_x = self.screen.get_width() - INSPECTOR_WIDTH
@@ -2287,6 +2533,32 @@ class Editor:
         self._clamp_timeline_scroll()
         self.status = f"Duration: {self.duration_input}s"
 
+    def _set_loop_boundary_from_x(self, screen_x: int, timeline: pygame.Rect) -> None:
+        if self._active_imported_effect():
+            return
+        time_ms = self._timeline_x_to_time(screen_x, timeline)
+        frame_ms = max(1.0, self._timeline_frame_ms())
+        boundary = max(1, min(self.project.stored_frame_count, round(time_ms / frame_ms)))
+        self.project.loop_frames = 0 if boundary >= self.project.stored_frame_count else boundary
+        self.status = (
+            "Loop uses the full effect"
+            if self.project.loop_frames == 0
+            else f"Loop ends after frame {self.project.loop_frames - 1} — outro plays once, ×{self.project.loops} repeats"
+        )
+
+    def _set_intro_boundary_from_x(self, screen_x: int, timeline: pygame.Rect) -> None:
+        if self._active_imported_effect():
+            return
+        time_ms = self._timeline_x_to_time(screen_x, timeline)
+        frame_ms = max(1.0, self._timeline_frame_ms())
+        boundary = max(0, min(self.project.normalized_loop_frames, round(time_ms / frame_ms)))
+        self.project.intro_frames = boundary
+        self.status = (
+            "No intro — the loop starts immediately"
+            if boundary == 0
+            else f"Intro plays once for {boundary} frame(s), then the loop starts"
+        )
+
     def _set_playhead(self, screen_x: int, timeline: pygame.Rect) -> None:
         time_ms = self._timeline_x_to_time(screen_x, timeline)
         start, end = self._timeline_window()
@@ -2380,7 +2652,7 @@ class Editor:
             )
         elif self.project.layers[self.active_layer].is_canvas:
             layer_index = self.active_layer
-        elif self.random_led_editor_open and self._active_random_led_effect():
+        elif (kind := self._active_generator_panel_kind()) and self._active_generator_effect(kind):
             layer_index = self.active_layer
         elif self.selected:
             layer_index = next(
@@ -2766,21 +3038,24 @@ class Editor:
 
     @staticmethod
     def _random_effect_parameter_value(
-        effect: RandomLedEffect, prop: str, time_ms: int | None = None,
+        effect, prop: str, time_ms: int | None = None,
     ) -> float | int:
         if prop == "opacity" and time_ms is not None:
             return float(effect.value_at(prop, time_ms))
         return getattr(effect, prop)
 
-    @staticmethod
-    def _normalize_random_effect_parameter(prop: str, value: float) -> float | int:
+    def _active_generator_specs(self) -> dict:
+        kind = self._active_generator_panel_kind()
+        return GENERATOR_KINDS[kind].specs if kind else RANDOM_LED_PROPERTY_SPECS
+
+    def _normalize_random_effect_parameter(self, prop: str, value: float) -> float | int:
         try:
-            return RANDOM_LED_PROPERTY_SPECS[prop].normalize(value)
+            return self._active_generator_specs()[prop].normalize(value)
         except KeyError as error:
-            raise ValueError(f"Unknown Random LED parameter: {prop}") from error
+            raise ValueError(f"Unknown effect parameter: {prop}") from error
 
     def _set_random_effect_parameter(
-        self, effect: RandomLedEffect, prop: str, value: float,
+        self, effect, prop: str, value: float,
     ) -> float | int:
         normalized = self._normalize_random_effect_parameter(prop, value)
         if prop == "opacity":
@@ -2796,11 +3071,12 @@ class Editor:
         return normalized
 
     def _scrub_random_effect_parameter(self, screen_x: int) -> None:
-        effect = self._active_random_led_effect()
+        kind = self._active_generator_panel_kind()
+        effect = self._active_generator_effect(kind) if kind else None
         if not effect or not self.scrub_prop or self.random_effect_drag_start is None:
             return
         prop = self.scrub_prop
-        spec = RANDOM_LED_PROPERTY_SPECS[prop]
+        spec = self._active_generator_specs()[prop]
         value = float(self.random_effect_drag_start) + (
             screen_x - self.drag_origin[0]
         ) * spec.sensitivity
@@ -2808,22 +3084,21 @@ class Editor:
         self.status = self._random_effect_parameter_status(prop, normalized)
 
     def _open_random_effect_input(self, prop: str) -> None:
-        effect = self._active_random_led_effect()
+        kind = self._active_generator_panel_kind()
+        effect = self._active_generator_effect(kind) if kind else None
         if not effect:
             return
         value = self._random_effect_parameter_value(effect, prop, self.current_ms)
         self.random_effect_editing = prop
-        self.random_effect_input = RANDOM_LED_PROPERTY_SPECS[prop].input_text(value)
+        self.random_effect_input = self._active_generator_specs()[prop].input_text(value)
         self.random_effect_input_select_all = True
         self.status = f"Type {self._random_effect_parameter_label(prop)}, then press Enter"
 
-    @staticmethod
-    def _random_effect_parameter_label(prop: str) -> str:
-        return RANDOM_LED_PROPERTY_SPECS[prop].label
+    def _random_effect_parameter_label(self, prop: str) -> str:
+        return self._active_generator_specs()[prop].label
 
-    @staticmethod
-    def _random_effect_parameter_status(prop: str, value: float | int) -> str:
-        spec = RANDOM_LED_PROPERTY_SPECS[prop]
+    def _random_effect_parameter_status(self, prop: str, value: float | int) -> str:
+        spec = self._active_generator_specs()[prop]
         return f"{spec.label}: {spec.display_text(value)}"
 
     def _set_animated(self, prop: str, value) -> None:
@@ -2834,10 +3109,65 @@ class Editor:
         else:
             self.selected.add_keyframe(prop, self.current_ms, value)
 
+    def _apply_color(self, color: tuple[int, int, int]) -> None:
+        """Applies a colour to whatever the palette is currently attached to
+        (random LED flash colour, a gradient stop, selected keyframes, or
+        the active shape). Undo-tracking is the CALLER's job: _action()'s
+        "color:"/"custom_color:" mutating-wrap covers palette swatch clicks,
+        and the colour picker's Apply button wraps this call explicitly."""
+        panel_kind = self._active_generator_panel_kind()
+        if panel_kind:
+            effect = self._active_generator_effect(panel_kind)
+            if effect is not None and hasattr(effect, "color"):
+                effect.color = color
+                self.status = f"{GENERATOR_KINDS[panel_kind].menu_label} color: RGB {color}"
+            return
+        if not self.selected:
+            return
+        if self.gradient_editor_open and self.selected_gradient_stop_id:
+            stop = self._selected_gradient_stop()
+            if stop:
+                stop.color = color
+                self.status = f"Gradient stop color: RGB {color}"
+            return
+        selected_shape_times: dict[str, set[int]] = {}
+        for target_id, _prop, time_ms in self.selected_keyframes:
+            target = self._find_keyframe_target(target_id)
+            if isinstance(target, Shape):
+                selected_shape_times.setdefault(target_id, set()).add(time_ms)
+        if selected_shape_times:
+            changed = 0
+            for target_id, times in selected_shape_times.items():
+                target = self._find_keyframe_target(target_id)
+                if not isinstance(target, Shape):
+                    continue
+                for time_ms in sorted(times):
+                    target.add_keyframe("color", time_ms, color)
+                    self.selected_keyframes.add((target.id, "color", time_ms))
+                    changed += 1
+            self.status = f"Color applied to {changed} selected keyframes"
+        else:
+            self._set_animated("color", color)
+
+    def _apply_custom_color(self, color: tuple[int, int, int]) -> None:
+        """Applies `color` (from the mixer) and, unless it's already saved,
+        adds it to the personal custom-colour palette (bounded, FIFO -
+        oldest evicted first, mirroring the effect bank's single-rolling-
+        backup philosophy: bounded state, not an ever-growing list)."""
+        if color not in (tuple(existing) for existing in self.custom_colors):
+            self.custom_colors.append(color)
+            self.custom_colors = self.custom_colors[-CUSTOM_COLOR_CAP:]
+            self.ui_settings["custom_colors"] = [list(entry) for entry in self.custom_colors]
+            try:
+                self.ui_settings_store.save(self.ui_settings)
+            except OSError:
+                pass
+        self._apply_color(color)
+
     def _set_canvas_enabled_key(self, layer: Layer, enabled: bool) -> None:
         layer.add_keyframe("canvas_enabled", self.current_ms, enabled)
         self.selected = None
-        self.random_led_editor_open = False
+        self._close_generator_panels()
         self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
         self.timeline_expanded_layers.add(layer.id)
         mode = "transparent empty LEDs" if enabled else "blackout empty LEDs"
@@ -2871,23 +3201,50 @@ class Editor:
             return None
         return self.imported_effects[self.active_import_index]
 
-    def _active_random_led_effect(self) -> RandomLedEffect | None:
+    def _active_generator_effect(self, kind: str) -> object | None:
         if not 0 <= self.active_layer < len(self.project.layers):
             return None
-        effects = self.project.layers[self.active_layer].effects
+        layer = self.project.layers[self.active_layer]
+        effects = getattr(layer, GENERATOR_KINDS[kind].list_attr)
         return effects[0] if effects else None
+
+    def _active_random_led_effect(self) -> RandomLedEffect | None:
+        return self._active_generator_effect("random_led")
+
+    def _active_generator_panel_kind(self) -> str | None:
+        return next(
+            (kind for kind in GENERATOR_KINDS if getattr(self, f"{kind}_editor_open")), None,
+        )
+
+    def _close_generator_panels(self) -> None:
+        for kind in GENERATOR_KINDS:
+            setattr(self, f"{kind}_editor_open", False)
+
+    @staticmethod
+    def _layer_generator_effects(layer: Layer) -> list:
+        effects: list = []
+        for kind in GENERATOR_KINDS.values():
+            effects.extend(getattr(layer, kind.list_attr))
+        return effects
+
+    @staticmethod
+    def _generator_kind_of(effect: object) -> str | None:
+        return next(
+            (kind.key for kind in GENERATOR_KINDS.values() if isinstance(effect, kind.cls)), None,
+        )
 
     def _active_keyframe_target(self) -> Layer | Shape | RandomLedEffect | None:
         layer = self.project.layers[self.active_layer]
         if layer.is_canvas:
             return layer
-        if self.random_led_editor_open:
-            return self._active_random_led_effect()
+        kind = self._active_generator_panel_kind()
+        if kind:
+            return self._active_generator_effect(kind)
         return self.selected
 
     def _find_keyframe_target(self, target_id: str) -> Layer | Shape | RandomLedEffect | None:
         for layer in self.project.layers:
-            for target in [layer, *layer.shapes, *layer.effects]:
+            for target in [layer, *layer.shapes, *self._layer_generator_effects(layer)]:
                 if target.id == target_id:
                     return target
         return None
@@ -2896,7 +3253,10 @@ class Editor:
         for layer in self.project.layers:
             if layer.id == target_id:
                 return layer
-            if any(target.id == target_id for target in [*layer.shapes, *layer.effects]):
+            if any(
+                target.id == target_id
+                for target in [*layer.shapes, *self._layer_generator_effects(layer)]
+            ):
                 return layer
         return None
 
@@ -2914,15 +3274,45 @@ class Editor:
         effect = self._active_imported_effect()
         return effect.duration_ms if effect else self.project.duration_ms
 
-    def _toggle_playback(self) -> None:
-        self.playing = not self.playing
-        if self.playing:
-            duration = max(1, self._playback_duration())
-            if self.current_ms >= duration:
-                self.current_ms = 0
-            self.status = "Playing animation"
+    def _loop_section_bounds(self) -> tuple[int, int]:
+        """The [start_ms, end_ms) span "Play Loop" repeats - the intro/loop
+        boundary the timeline bracket controls, not the whole stored duration."""
+        imported = self._active_imported_effect()
+        frame_ms = self._timeline_frame_ms()
+        if imported:
+            intro_frames = imported.normalized_intro_frames
+            loop_frames = imported.normalized_loop_frames
         else:
+            intro_frames = self.project.normalized_intro_frames
+            loop_frames = self.project.normalized_loop_frames
+        start_ms = intro_frames * frame_ms
+        end_ms = max(start_ms + frame_ms, loop_frames * frame_ms)
+        return round(start_ms), round(end_ms)
+
+    def _toggle_playback(self) -> None:
+        if self.playing and not self.loop_playback:
+            self.playing = False
             self.status = "Playback stopped"
+            return
+        self.playing = True
+        self.loop_playback = False
+        duration = max(1, self._playback_duration())
+        if self.current_ms >= duration:
+            self.current_ms = 0
+        self.status = "Playing the full sequence, looping"
+
+    def _toggle_loop_playback(self) -> None:
+        if self.playing and self.loop_playback:
+            self.playing = False
+            self.loop_playback = False
+            self.status = "Playback stopped"
+            return
+        self.playing = True
+        self.loop_playback = True
+        start_ms, end_ms = self._loop_section_bounds()
+        if not start_ms <= self.current_ms < end_ms:
+            self.current_ms = start_ms
+        self.status = "Looping only the loop section"
 
     def _step_frame(self, direction: int) -> None:
         frame_ms = max(1, round(self._timeline_frame_ms()))
@@ -3041,7 +3431,7 @@ class Editor:
         self.stencil = False
         self.calibration = False
         self.gradient_editor_open = False
-        self.random_led_editor_open = False
+        self._close_generator_panels()
         self.random_effect_editing = None
         self.random_effect_input_select_all = False
         self.random_effect_drag_start = None
@@ -3055,6 +3445,7 @@ class Editor:
         self.timeline_zoom = 1.0
         self.timeline_scroll_ms = 0.0
         self.timeline_layer_scroll = 0
+        self.inspector_scroll = 0
         self.timeline_expanded_layers.clear()
         self.timeline_mode = "dope"
         self.graph_target_id = None
@@ -3160,6 +3551,11 @@ class Editor:
             directory = directory.resolve()
         except OSError:
             directory = Path.cwd()
+        if self._try_native_file_dialog(
+            title=title, mode=mode, purpose=purpose,
+            directory=directory, extension=extension, filename=filename,
+        ):
+            return
         self.file_browser_open = True
         self.file_browser_mode = mode
         self.file_browser_purpose = purpose
@@ -3177,6 +3573,62 @@ class Editor:
             f"Showing folders and *{extension} files" if extension else "Choose a file"
         )
         self.playing = False
+
+    def _try_native_file_dialog(
+        self,
+        *,
+        title: str,
+        mode: str,
+        purpose: str,
+        directory: Path,
+        extension: str,
+        filename: str = "",
+    ) -> bool:
+        """On a real (non-headless) Windows session, use the native Explorer
+        picker instead of the in-app browser. Returns True once handled
+        (accepted or cancelled) - the caller should not also open the
+        in-app browser. Returns False to fall back to it: not Windows,
+        no real display (tests/--smoke-test force SDL_VIDEODRIVER=dummy),
+        or tkinter isn't available (not guaranteed on every Python build,
+        e.g. Raspberry Pi OS - though the Pi never reaches this branch
+        anyway since it isn't Windows).
+        """
+        if os.name != "nt" or os.environ.get("SDL_VIDEODRIVER") == "dummy":
+            return False
+        try:
+            import tkinter
+            from tkinter import filedialog
+        except ImportError:
+            return False
+        label = extension.lstrip(".").upper() or "All"
+        file_types = [(f"{label} files", f"*{extension}")] if extension else []
+        file_types.append(("All files", "*.*"))
+        root = tkinter.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        try:
+            if mode == "save":
+                chosen = filedialog.asksaveasfilename(
+                    parent=root, title=title, initialdir=str(directory),
+                    initialfile=filename, defaultextension=extension,
+                    filetypes=file_types,
+                )
+            else:
+                chosen = filedialog.askopenfilename(
+                    parent=root, title=title, initialdir=str(directory), filetypes=file_types,
+                )
+        finally:
+            root.destroy()
+        if not chosen:
+            if purpose.startswith("bank_"):
+                self.export_bank_status = "File selection cancelled"
+            else:
+                self.status = "File selection cancelled"
+            return True
+        # asksaveasfilename already asked "replace existing file?" natively
+        # when applicable, so _complete_file_browser_path can write directly.
+        self._complete_file_browser_path(purpose, Path(chosen))
+        return True
 
     def _file_browser_entries(self) -> list[Path]:
         try:
@@ -3513,6 +3965,7 @@ class Editor:
             self.export_bank_status = f"Mapped {len(self.export_bank_effects)} effects from {self.effect_data_path.name}"
         else:
             self.export_bank_status = "Effect Bank ready — current project is included"
+        self._suggest_effect_id_if_still_default()
 
     def map_effect_bank_file(self, path: str | Path) -> None:
         target = Path(path)
@@ -3522,6 +3975,30 @@ class Editor:
         self.export_bank_selected = 0 if effects else -1
         self.export_bank_scroll = 0
         self.export_bank_status = f"Mapped {len(effects)} effects from {target.name}"
+        self._suggest_effect_id_if_still_default()
+        # Remembered across restarts (see _load_remembered_effect_bank_header)
+        # so mapping the same firmware header is a one-time action.
+        self.ui_settings["last_effect_bank_header"] = str(self.export_bank_path)
+        try:
+            self.ui_settings_store.save(self.ui_settings)
+        except OSError:
+            pass
+
+    def _load_remembered_effect_bank_header(self) -> None:
+        remembered = self.ui_settings.get("last_effect_bank_header")
+        if not remembered:
+            return
+        try:
+            self.map_effect_bank_file(remembered)
+        except Exception:
+            # Moved/deleted/corrupt since last time. This is a best-effort
+            # startup convenience - deliberately broad so a stale remembered
+            # path can never prevent the editor from launching.
+            self.export_bank_status = f"Could not re-map {remembered} — pick it again from Map header…"
+
+    def _export_bank_backup_path(self, path: str | Path) -> Path:
+        target = Path(path)
+        return target.with_name(target.name + ".bak")
 
     def export_effect_bank_file(self, path: str | Path) -> Path:
         led_errors = self.led_map.validate()
@@ -3533,6 +4010,14 @@ class Editor:
         # exporter would otherwise reject at write time).
         combined = resolve_effects(deepcopy(self.export_bank_effects), current)
         changes = describe_changes(self.export_bank_effects, combined)
+        target = Path(path)
+        backed_up = False
+        if target.is_file():
+            # A single rolling backup of whatever we're about to overwrite -
+            # not a growing history, just "undo my last export". Overwrites
+            # any previous backup on purpose (see restore_export_bank_backup).
+            shutil.copy2(target, self._export_bank_backup_path(target))
+            backed_up = True
         destination = export_effect_bank(combined, path, max_bytes=EFFECT_BANK_CAPACITY)
         self.export_bank_path = destination.resolve()
         change_summary = "; ".join(change.description for change in changes)
@@ -3540,9 +4025,31 @@ class Editor:
             f"Exported {len(combined)} effects — "
             f"{self._export_bank_used_bytes() / 1024:.1f} KiB"
             + (f" — {change_summary}" if change_summary else "")
+            + (" — previous version backed up" if backed_up else "")
         )
         self.status = f"Effect bank exported: {destination.name}"
         return destination
+
+    def restore_export_bank_backup(self) -> bool:
+        """Undo the last export_effect_bank_file() write: reload the single
+        rolling backup (the file's content right before it was last
+        overwritten) back into the in-memory bank. Does not touch disk -
+        the user still has to click Export bank… to write it back out."""
+        target = self.export_bank_path or EXPORT_FILE
+        backup_path = self._export_bank_backup_path(target)
+        if not backup_path.is_file():
+            self.export_bank_status = "No backup available to restore"
+            return False
+        effects = load_effect_data(backup_path)
+        self.export_bank_effects = deepcopy(effects)
+        self.export_bank_selected = 0 if effects else -1
+        self.export_bank_scroll = 0
+        self.export_bank_status = (
+            f"Restored backup from before the last export ({len(effects)} effects) — "
+            "click Export bank… to write it back out"
+        )
+        self._suggest_effect_id_if_still_default()
+        return True
 
     def _choose_export_bank_map(self) -> None:
         self._open_file_browser(
@@ -3605,7 +4112,7 @@ class Editor:
         query and ordered by the current sort mode. The pinned "current project"
         row is handled separately by callers - this only covers mapped/bank
         effects, since searching/sorting the project you're actively editing
-        isn't useful (it's always shown first).
+        isn't useful (it's always shown last, after the mapped bank).
 
         Effect IDs are unique within export_bank_effects (enforced by
         _export_bank_validation_errors and the ID-edit commit path), so
@@ -3618,6 +4125,75 @@ class Editor:
         ordered = sort_effects(candidates, self.export_bank_sort_mode)
         index_by_id = {effect.effect_id: index for index, effect in enumerate(self.export_bank_effects)}
         return [(index_by_id[effect.effect_id], effect) for effect in ordered]
+
+    def _export_bank_color_index(self, entry_index: int) -> int:
+        """Colour-block position for an entry (real bank index, or -1 for the
+        current project) - shared by the memory bar, the Bank Content list,
+        and the Selected Effect badge so the same effect always gets the
+        same colour. The current project is pinned last (see _draw_export_bank),
+        so its slot is simply one past the bank's own index range."""
+        return len(self.export_bank_effects) if entry_index == -1 else entry_index
+
+    def _render_led_thumbnail(self, colors: list[tuple[int, int, int]], size: int) -> pygame.Surface:
+        """A tiny spatial preview: each LED's colour drawn at its own
+        playfield position (from the LED map), scaled into a size×size
+        square - a rough silhouette of the actual light pattern."""
+        surface = pygame.Surface((size, size), pygame.SRCALPHA)
+        points = self.led_map.normalized_points(firmware_order=True)
+        radius = max(1, size // 20)
+        for point, color in zip(points, colors):
+            x = round(point[0] * size)
+            y = round(point[1] * size)
+            pygame.draw.circle(surface, color, (x, y), radius)
+        return surface
+
+    def _effect_preview_frame_index(self, effect: ImportedEffect) -> int:
+        """The frame with the most non-transparent brightness - usually the
+        most recognizable moment of the effect (frame 0 of an overlay is
+        often mostly transparent, which makes a poor thumbnail)."""
+        if not effect.frames:
+            return 0
+
+        def brightness(frame: list[tuple[int, int, int]]) -> int:
+            return sum(
+                r + g + b for r, g, b in frame
+                if not (effect.overlay and (r, g, b) == TRANSPARENT_SENTINEL)
+            )
+
+        return max(range(len(effect.frames)), key=lambda index: brightness(effect.frames[index]))
+
+    def _effect_thumbnail(self, effect: ImportedEffect, size: int) -> pygame.Surface:
+        key = (id(effect.frames), effect.effect_id, size)
+        cached = self._effect_thumbnail_cache.get(key)
+        if cached is not None:
+            return cached
+        if effect.frames:
+            frame = effect.frames[self._effect_preview_frame_index(effect)]
+            colors = [
+                (0, 0, 0) if effect.overlay and color == TRANSPARENT_SENTINEL else color
+                for color in frame
+            ]
+        else:
+            colors = [(0, 0, 0)] * len(self.led_map.leds)
+        surface = self._render_led_thumbnail(colors, size)
+        self._effect_thumbnail_cache[key] = surface
+        return surface
+
+    def _suggest_effect_id_if_still_default(self) -> None:
+        """A brand-new project starts at the class default firmware ID (1).
+        Once a bank is mapped, ID 1 often already belongs to whatever
+        effect was exported first there, so exporting would silently
+        REPLACE it (see resolve_effects) instead of adding a new entry -
+        confusing for a project the user hasn't even assigned an ID to
+        yet. Bump to the next free ID once, but only on an actual
+        collision: if ID 1 is free in the bank, there is nothing to fix,
+        and an ID the user explicitly types is never overridden either."""
+        if self.project.effect_id != 1:
+            return
+        used_ids = [effect.effect_id for effect in self.export_bank_effects]
+        if 1 not in used_ids:
+            return
+        self.project.effect_id = max(used_ids, default=0) + 1
 
     def _load_export_bank_project(self, confirm: bool = True) -> bool:
         effect = self._export_bank_selected_effect()
@@ -3703,6 +4279,8 @@ class Editor:
         if action == "export_bank_close":
             self.export_bank_open = False
             self.status = "Closed Effect Bank"
+        elif action == "export_bank_restore_backup":
+            self.restore_export_bank_backup()
         elif action == "export_bank_map":
             self._choose_export_bank_map()
         elif action == "export_bank_write":
@@ -3861,6 +4439,7 @@ class Editor:
 
     def _start_led_move(self) -> None:
         led = self._current_led()
+        self._begin_led_change()
         self.led_move_origin = (led.x, led.y)
         self.drag_mode = "led_move"
         self.status = f"Moving LED {led.firmware_index} — click to place, Esc to cancel"
@@ -3871,6 +4450,7 @@ class Editor:
         self.led_move_origin = None
         self.led_move_ready_id = led.id
         self.led_map.mapping_status = "calibration_in_progress"
+        self._commit_led_change()
         self.status = f"LED {led.firmware_index} placed — save the LED map"
 
     def _cancel_led_move(self) -> None:
@@ -3881,12 +4461,14 @@ class Editor:
         self.drag_mode = None
         self.led_move_origin = None
         self.led_move_ready_id = led.id
+        self.led_map_change_snapshot = None  # reverted in place - nothing to undo
         self.status = f"LED {led.firmware_index} movement cancelled"
 
     def _add_led(self) -> None:
         if len(self.led_map.leds) >= 68:
             self.status = "The firmware output is limited to 68 LED slots"
             return
+        self._begin_led_change()
         new_id = max((led.id for led in self.led_map.leds), default=-1) + 1
         new_index = len(self.led_map.leds)
         self.led_map.leds.append(Led(
@@ -3897,12 +4479,14 @@ class Editor:
         self.led_map.mapping_status = "calibration_in_progress"
         self._select_led_id(new_id)
         self.led_move_ready_id = new_id
+        self._commit_led_change()
         self.status = f"Added LED {new_index} in the center — click it to move"
 
     def _delete_led(self) -> None:
         if len(self.led_map.leds) <= 1:
             self.status = "The LED map must keep at least one position"
             return
+        self._begin_led_change()
         removed = self._current_led()
         self.led_map.leds.remove(removed)
         for led in self.led_map.leds:
@@ -3913,6 +4497,7 @@ class Editor:
         next_led = min(self.led_map.leds, key=lambda led: abs(led.id - removed.id))
         self._select_led_id(next_led.id)
         self.led_move_ready_id = next_led.id
+        self._commit_led_change()
         self.status = f"Deleted LED {removed.firmware_index} — save the LED map"
 
     def _sync_led_fields(self) -> None:
@@ -3951,10 +4536,12 @@ class Editor:
                 self.status = f"LED ID must be 0–{len(self.led_map.leds) - 1}"
                 return
             led = self._current_led()
+            self._begin_led_change()
             self.led_map.set_firmware_index(led.id, target, swap=True)
             self.led_map.mapping_status = "calibration_in_progress"
             self.led_id_editing = False
             self._sync_led_fields()
+            self._commit_led_change()
             self.status = f"Graphic position {led.id} assigned to LED ID {target}"
             return
         if event.key == pygame.K_ESCAPE:
@@ -3985,9 +4572,11 @@ class Editor:
             if not name:
                 self.status = "LED name cannot be empty"
                 return
+            self._begin_led_change()
             self._current_led().name = name
             self.led_name_editing = False
             self.led_map.mapping_status = "calibration_in_progress"
+            self._commit_led_change()
             self.status = (
                 "LED excluded from export" if name.upper() == "NULL"
                 else f"LED name saved: {name}"
@@ -4091,7 +4680,8 @@ class Editor:
 
     def _handle_random_effect_input(self, event: pygame.event.Event) -> None:
         prop = self.random_effect_editing
-        effect = self._active_random_led_effect()
+        kind = self._active_generator_panel_kind()
+        effect = self._active_generator_effect(kind) if kind else None
         if not prop or not effect:
             self.random_effect_editing = None
             return
@@ -4119,7 +4709,7 @@ class Editor:
             except ValueError:
                 self.status = f"{self._random_effect_parameter_label(prop)} must be a number"
                 return
-            spec = RANDOM_LED_PROPERTY_SPECS[prop]
+            spec = self._active_generator_specs()[prop]
             low, high = spec.input_limits()
             if (low is not None and entered < low) or (high is not None and entered > high):
                 self.status = (
@@ -4293,6 +4883,8 @@ class Editor:
 
         self._draw_timeline(timeline)
         self._draw_panel(panel)
+        if self.generator_menu_open:
+            self._draw_generator_menu()
         if self.tool_drag:
             mouse = pygame.mouse.get_pos()
             pygame.draw.circle(self.screen, ACCENT, mouse, 18, 2)
@@ -4307,6 +4899,8 @@ class Editor:
             self._draw_recovery_dialog()
         if self.file_browser_open:
             self._draw_file_browser()
+        if self.color_picker_open:
+            self._draw_color_picker()
         if self.confirmation_open:
             self._draw_confirmation_dialog()
         self._draw_hover_tooltip()
@@ -4425,26 +5019,30 @@ class Editor:
             project_label += "  •"
         self.screen.blit(self.small.render(project_label, True, (108, 180, 255)), (16, 29))
         items = [
-            ("play", "Stop" if self.playing else "Play"),
-            ("keyframe", "+ Keyframe"),
-            ("stencil", "Stencil"),
-            ("calibration", "LED map"),
+            ("new", "New"),
             ("save", "Save*" if self._project_is_dirty() else "Save"),
             ("load", "Load"),
-            ("export", "Export"),
+            ("export", "Bank"),
+            None,  # extra gap before Stencil
+            ("stencil", "Stencil"),
+            None,  # extra gap before LED Map
+            ("calibration", "LED Map"),
         ]
         compact = width < 1180
         compact_labels = {
-            "play": "Stop" if self.playing else "Play",
-            "keyframe": "+K",
-            "stencil": "STN",
-            "calibration": "LED",
+            "new": "New",
             "save": "Save*" if self._project_is_dirty() else "Save",
             "load": "Load",
-            "export": "Export",
+            "export": "Bank",
+            "stencil": "STN",
+            "calibration": "LED",
         }
         x = 184 if compact else 238
-        for action, label in items:
+        for entry in items:
+            if entry is None:
+                x += 16 if compact else 24
+                continue
+            action, label = entry
             if compact:
                 label = compact_labels[action]
             button_width = max(42 if compact else 58, self.small.size(label)[0] + (12 if compact else 20))
@@ -4473,42 +5071,8 @@ class Editor:
         update_surface = self.small.render(update_label, True, update_color)
         self.screen.blit(update_surface, update_surface.get_rect(center=update_area.center))
 
-        self._button(pygame.Rect(width - 168, 11, 58, 32), "new", "New", False)
         self._button(pygame.Rect(width - 102, 11, 36, 32), "help", "?", False)
         self._button(pygame.Rect(width - 58, 11, 48, 32), "exit", "Exit", False)
-
-        duration_field = self._duration_input_rect()
-        imported = self._active_imported_effect()
-        if not compact:
-            label = self.small.render("Length", True, (154, 162, 180))
-            self.screen.blit(label, (duration_field.x - label.get_width() - 7, 20))
-        pygame.draw.rect(self.screen, (35, 39, 48), duration_field, border_radius=4)
-        pygame.draw.rect(
-            self.screen, ACCENT if self.duration_editing else (76, 82, 98),
-            duration_field, 1, border_radius=4,
-        )
-        duration_value = (
-            self.duration_input if self.duration_editing
-            else f"{self._playback_duration() / 1000:.2f}" if imported
-            else f"{self.project.duration_ms / 1000:.1f}"
-        )
-        if self.duration_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
-            duration_value += "|"
-        value_surface = self.small.render(f"{duration_value}s", True, (235, 238, 245))
-        self.screen.blit(value_surface, value_surface.get_rect(center=duration_field.center))
-        if not imported:
-            self.buttons.append((duration_field, "edit_duration", "Duration"))
-
-        duration_slider = self._duration_slider_rect()
-        pygame.draw.line(
-            self.screen, (58, 63, 76) if imported else (91, 98, 115),
-            duration_slider.midleft, duration_slider.midright, 4,
-        )
-        if not imported:
-            ratio = (self.project.duration_ms - 500) / 14500
-            handle_x = duration_slider.x + round(max(0.0, min(1.0, ratio)) * duration_slider.width)
-            pygame.draw.circle(self.screen, ACCENT, (handle_x, duration_slider.centery), 7)
-            self.buttons.append((duration_slider.inflate(0, 14), "duration_slider", "Duration"))
 
         pygame.draw.rect(self.screen, (34, 37, 46), (0, TOP_BAR, TOOLBAR_WIDTH, self.screen.get_height() - TOP_BAR))
         tools = [
@@ -4534,11 +5098,12 @@ class Editor:
         self.screen.blit(zoom_text, zoom_text.get_rect(center=(TOOLBAR_WIDTH // 2, y + 12)))
         snap_rect = pygame.Rect(10, y + 34, 48, 31)
         self._button(snap_rect, "snap", "Snap", self.snap)
-        import_rect = pygame.Rect(10, y + 73, 48, 31)
-        self._button(import_rect, "import_effect_data", "Import", False)
+        # No standalone "Import" button - effect_data.h import still works via
+        # Ctrl+I (see the Hotkeys panel) and the Effect Bank's "Map header…".
         if self.imported_effects:
-            self._button(pygame.Rect(10, y + 112, 48, 31), "next_imported_effect", "Next FX", imported is not None)
-            self._button(pygame.Rect(10, y + 151, 48, 31), "project_preview", "Project", imported is None)
+            imported = self._active_imported_effect()
+            self._button(pygame.Rect(10, y + 73, 48, 31), "next_imported_effect", "Next FX", imported is not None)
+            self._button(pygame.Rect(10, y + 112, 48, 31), "project_preview", "Project", imported is None)
 
     def _draw_shapes(self, canvas: pygame.Rect) -> None:
         for layer in self.project.layers:
@@ -4563,7 +5128,7 @@ class Editor:
                     surface.get_size(), shape.kind, local, state, canvas_scale,
                 )
                 gradient = (
-                    state.get("gradient_type", "solid") in {"linear", "radial"}
+                    state.get("gradient_type", "solid") in {"linear", "radial", "noise"}
                     and len(state.get("gradient_stops", [])) >= 2
                 )
                 if gradient:
@@ -4572,6 +5137,8 @@ class Editor:
                         state.get("gradient_radial_mode", "radius"),
                         float(state.get("gradient_angle", 0.0)),
                         int(220 * state["opacity"] * layer_opacity),
+                        noise_seed=state.get("noise_seed", 0),
+                        time_ms=self.current_ms,
                     )
                 else:
                     paint = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
@@ -4632,8 +5199,21 @@ class Editor:
         self,
         size: tuple[int, int], stops: list[GradientStop], gradient_type: str,
         radial_mode: str, angle: float, alpha: int,
+        noise_seed: int = 0, time_ms: int = 0,
     ) -> pygame.Surface:
         width, height = size
+        if gradient_type == "noise":
+            # A coarse speckle grid (not per-pixel) so the edit-view preview
+            # reads as flickering static rather than a smooth gradient, and
+            # stays cheap to redraw every frame while scrubbing/playing.
+            result = pygame.Surface(size, pygame.SRCALPHA)
+            cell = 6
+            for grid_y in range(0, height, cell):
+                for grid_x in range(0, width, cell):
+                    point = (grid_x / max(1, width), grid_y / max(1, height))
+                    color = noise_color(noise_seed, point, time_ms, stops)
+                    result.fill((*color, alpha), (grid_x, grid_y, cell, cell))
+            return result
         if gradient_type == "radial":
             if radial_mode == "angular":
                 side = max(2, max(width, height))
@@ -4734,6 +5314,53 @@ class Editor:
         track = self._timeline_track(timeline)
         pixels_per_frame = track.width * self._timeline_frame_ms() / max(1.0, visible_ms)
         return self._active_imported_effect() is not None or pixels_per_frame >= 18
+
+    def _draw_loop_bracket(
+        self, ruler: pygame.Rect, track: pygame.Rect, timeline: pygame.Rect, start: float, end: float,
+    ) -> None:
+        frame_ms = self._timeline_frame_ms()
+        duration_ms = self._playback_duration()
+        has_outro = self.project.loop_frames != 0
+        has_intro = self.project.normalized_intro_frames > 0
+        intro_boundary_ms = self.project.normalized_intro_frames * frame_ms
+        loop_boundary_ms = self.project.normalized_loop_frames * frame_ms
+
+        def x_at(time_ms: float) -> int:
+            return round(max(track.x, min(track.right, self._time_to_timeline_x(time_ms, timeline))))
+
+        def tint_span(left: int, right: int, color: tuple[int, int, int, int]) -> None:
+            if right <= left:
+                return
+            surface = pygame.Surface((right - left, ruler.height), pygame.SRCALPHA)
+            surface.fill(color)
+            self.screen.blit(surface, (left, ruler.y))
+
+        once_color = (255, 170, 60, 30)
+        loop_color = (90, 170, 255, 40)
+        intro_right = x_at(intro_boundary_ms)
+        loop_right = x_at(loop_boundary_ms if has_outro else duration_ms)
+        if has_intro:
+            tint_span(x_at(0), intro_right, once_color)
+        tint_span(intro_right, loop_right, loop_color)
+        if has_outro:
+            tint_span(loop_right, x_at(duration_ms), once_color)
+
+        def draw_handle(boundary_ms: float, action: str, drag_name: str, tooltip: str) -> None:
+            if not (start <= boundary_ms <= end) or duration_ms <= 0:
+                return
+            handle_x = round(self._time_to_timeline_x(boundary_ms, timeline))
+            dragging = self.drag_mode == drag_name
+            handle_color = (255, 214, 110) if dragging else (120, 190, 255)
+            pygame.draw.line(self.screen, handle_color, (handle_x, ruler.y), (handle_x, track.bottom), 2)
+            tab = pygame.Rect(0, 0, 11, ruler.height - 4)
+            tab.center = (handle_x, ruler.centery)
+            pygame.draw.rect(self.screen, handle_color, tab, border_radius=3)
+            hit_rect = pygame.Rect(0, 0, 18, ruler.height + 12)
+            hit_rect.center = (handle_x, ruler.centery)
+            self.buttons.append((hit_rect, action, tooltip))
+
+        draw_handle(intro_boundary_ms, "intro_bracket_handle", "intro_bracket", "Drag to set where the intro ends and the loop starts")
+        draw_handle(loop_boundary_ms, "loop_bracket_handle", "loop_bracket", "Drag to set where the loop ends and the outro starts")
 
     def _draw_graph_editor(
         self, timeline: pygame.Rect, start: float, end: float
@@ -4957,6 +5584,45 @@ class Editor:
             pygame.Rect(rect.x + 266, rect.y + 5, 32, 25),
             "step_frame:1", "next",
         )
+        self._transport_button(
+            pygame.Rect(rect.x + 300, rect.y + 5, 28, 25),
+            "play_loop", "loop", self.playing and self.loop_playback,
+        )
+        self._button(
+            self._timeline_keyframe_button_rect(rect), "keyframe", "+ Keyframe", False,
+        )
+
+        label_x = self._timeline_duration_area_x(rect)
+        self.screen.blit(self.small.render("Length", True, (154, 162, 180)), (label_x, rect.y + 12))
+        duration_field = self._duration_input_rect(rect)
+        pygame.draw.rect(self.screen, (35, 39, 48), duration_field, border_radius=4)
+        pygame.draw.rect(
+            self.screen, ACCENT if self.duration_editing else (76, 82, 98),
+            duration_field, 1, border_radius=4,
+        )
+        duration_value = (
+            self.duration_input if self.duration_editing
+            else f"{self._playback_duration() / 1000:.2f}" if imported
+            else f"{self.project.duration_ms / 1000:.1f}"
+        )
+        if self.duration_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            duration_value += "|"
+        value_surface = self.small.render(f"{duration_value}s", True, (235, 238, 245))
+        self.screen.blit(value_surface, value_surface.get_rect(center=duration_field.center))
+        if not imported:
+            self.buttons.append((duration_field, "edit_duration", "Duration"))
+
+        duration_slider = self._duration_slider_rect(rect)
+        pygame.draw.line(
+            self.screen, (58, 63, 76) if imported else (91, 98, 115),
+            duration_slider.midleft, duration_slider.midright, 4,
+        )
+        if not imported:
+            ratio = (self.project.duration_ms - 500) / 14500
+            handle_x = duration_slider.x + round(max(0.0, min(1.0, ratio)) * duration_slider.width)
+            pygame.draw.circle(self.screen, ACCENT, (handle_x, duration_slider.centery), 7)
+            self.buttons.append((duration_slider.inflate(0, 14), "duration_slider", "Duration"))
+
         ruler = pygame.Rect(
             track.x,
             rect.y + TIMELINE_TOOLBAR_HEIGHT,
@@ -5006,6 +5672,9 @@ class Editor:
                     (x + 4, ruler.y + 3),
                 )
                 tick += tick_ms
+
+        if not imported:
+            self._draw_loop_bracket(ruler, track, rect, start, end)
 
         if self.timeline_mode == "graph" and not imported:
             self._draw_graph_editor(rect, start, end)
@@ -5092,9 +5761,11 @@ class Editor:
                 target = self._timeline_row_target(timeline_row)
                 if not target or not timeline_row.prop:
                     continue
+                target_generator_kind = self._generator_kind_of(target)
                 target_active = target is self.selected or (
-                    isinstance(target, RandomLedEffect)
-                    and self.random_led_editor_open and index == self.active_layer
+                    target_generator_kind is not None
+                    and getattr(self, f"{target_generator_kind}_editor_open")
+                    and index == self.active_layer
                 ) or (
                     isinstance(target, Layer) and target.is_canvas and index == self.active_layer
                 )
@@ -5213,18 +5884,27 @@ class Editor:
         if self.calibration:
             self._draw_calibration_panel(panel, x, panel.y + 80)
             return
-        if self.random_led_editor_open:
-            if self._active_random_led_effect():
-                self._draw_random_led_panel(panel, x)
+        generator_kind = self._active_generator_panel_kind()
+        if generator_kind:
+            effect = self._active_generator_effect(generator_kind)
+            if effect:
+                self._draw_generator_panel(panel, x, generator_kind, effect)
                 return
-            self.random_led_editor_open = False
+            self._close_generator_panels()
         if self.gradient_editor_open:
             if self.selected:
                 self._draw_gradient_panel(panel, x)
                 return
             self.gradient_editor_open = False
 
-        y = panel.y + 76
+        content_top = panel.y + 76
+        content_bottom = panel.bottom - 47
+        self.inspector_scroll = max(0, min(self.inspector_max_scroll, self.inspector_scroll))
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(pygame.Rect(panel.x, content_top, panel.width, content_bottom - content_top))
+        buttons_before = len(self.buttons)
+
+        y = content_top - self.inspector_scroll
         imported = self._active_imported_effect()
         self._draw_panel_section(x, y, "Firmware V4")
         y += 27
@@ -5243,12 +5923,15 @@ class Editor:
             y += 34
             self._button(pygame.Rect(x, y, 61, 27), "loops:-1", "Loop −", False)
             self._button(pygame.Rect(x + 68, y, 61, 27), "loops:1", "Loop +", False)
-            self._button(pygame.Rect(x + 136, y, 82, 27), "set_loop_end", "Set end", False)
-            self._button(pygame.Rect(x + 225, y, 50, 27), "clear_loop_end", "Full", False)
+            self._button(pygame.Rect(x + 136, y, 139, 27), "clear_loop_end", "Full (no outro)", False)
             y += 32
             loop_frames = self.project.normalized_loop_frames
+            intro_frames = self.project.normalized_intro_frames
+            loop_range = (
+                f"{intro_frames}▸{loop_frames}" if intro_frames else f"{loop_frames}"
+            )
             stats = (
-                f"×{self.project.loops} • {loop_frames}/{self.project.stored_frame_count} • "
+                f"×{self.project.loops} • {loop_range}/{self.project.stored_frame_count} • "
                 f"{self.project.flash_bytes} B • {self.project.firmware_playback_ms / 1000:.2f}s"
             )
             self.screen.blit(self.small.render(stats, True, (154, 162, 180)), (x, y))
@@ -5262,7 +5945,12 @@ class Editor:
         y += 12
         self._draw_panel_section(x, y, "Layers")
         self._button(pygame.Rect(panel.right - 190, y - 3, 34, 25), "canvas_layer", "C+", False)
-        self._button(pygame.Rect(panel.right - 150, y - 3, 34, 25), "random_led_editor", "FX", False)
+        fx_button = pygame.Rect(panel.right - 150, y - 3, 34, 25)
+        self._generator_menu_anchor = fx_button
+        self._button(
+            fx_button, "generator_menu_toggle", "FX",
+            self.generator_menu_open or self._active_generator_panel_kind() is not None,
+        )
         self._button(pygame.Rect(panel.right - 110, y - 3, 28, 25), "duplicate_layer", "D", False)
         self._button(pygame.Rect(panel.right - 76, y - 3, 28, 25), "delete_layer", "−", False)
         self._button(pygame.Rect(panel.right - 42, y - 3, 28, 25), "layer", "+", False)
@@ -5342,9 +6030,28 @@ class Editor:
                     editing=editing,
                     input_text=self.property_input if editing else "",
                 )
-            y += 193
+            # 9 properties in a 2-column grid leave the last cell (row 4,
+            # col 1) empty - the Wiggle toggle lives there so it costs no
+            # extra panel height when disabled, which is the common case.
+            wiggle_enabled = bool(state["wiggle_enabled"])
+            self._button(
+                pygame.Rect(x + 143, y + 4 * 37, 132, 30), "toggle_wiggle",
+                "Wiggle: ON" if wiggle_enabled else "Wiggle: OFF", wiggle_enabled,
+            )
+            y += 183
+            if wiggle_enabled:
+                for index, prop in enumerate(("wiggle_amplitude", "wiggle_speed")):
+                    field = pygame.Rect(x + index * 143, y, 132, 30)
+                    editing = self.property_editing == prop
+                    self._numeric_property_widget(
+                        field, SHAPE_PROPERTY_SPECS[prop], getattr(self.selected, prop),
+                        f"scrub:{prop}",
+                        editing=editing,
+                        input_text=self.property_input if editing else "",
+                    )
+                y += 30
             self.screen.blit(self.small.render("Style", True, (172, 178, 193)), (x, y))
-            y += 23
+            y += 20
             self._button(
                 pygame.Rect(x, y, 132, 29), "fill_mode:fill", "Fill",
                 state.get("fill_mode", "fill") == "fill",
@@ -5353,7 +6060,7 @@ class Editor:
                 pygame.Rect(x + 143, y, 132, 29), "fill_mode:stroke", "Stroke",
                 state.get("fill_mode", "fill") == "stroke",
             )
-            y += 37
+            y += 34
             if state.get("fill_mode", "fill") == "stroke":
                 stroke_field = pygame.Rect(x, y, 275, 30)
                 self._numeric_property_widget(
@@ -5362,25 +6069,21 @@ class Editor:
                     editing=self.stroke_editing,
                     input_text=self.stroke_input if self.stroke_editing else "",
                 )
-                y += 37
+                y += 32
             gradient_type = state.get("gradient_type", "solid").title()
             paint_target = "stroke" if state.get("fill_mode", "fill") == "stroke" else "fill"
             self._button(
                 pygame.Rect(x, y, 275, 30), "gradient_editor",
                 f"Gradient {paint_target}…  {gradient_type}", gradient_type != "Solid",
             )
-            y += 42
+            y += 32
             self.screen.blit(self.small.render("Color", True, (172, 178, 193)), (x, y))
-            y += 24
-            for index, color in enumerate(PALETTE):
-                rect = pygame.Rect(x + index * 34, y, 27, 27)
-                pygame.draw.rect(self.screen, color, rect, border_radius=4)
-                if tuple(state["color"]) == color:
-                    pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
-                self.buttons.append((rect, f"color:{index}", ""))
-            y += 43
+            y += 20
+            y = self._draw_color_palette(x, y, tuple(state["color"]))
+            y += 3
             self._button(pygame.Rect(x, y, 132, 30), "duplicate", "Duplicate", False)
             self._button(pygame.Rect(x + 143, y, 132, 30), "delete", "Delete", False)
+            y += 30
         elif active_panel_layer.is_canvas:
             enabled = bool(active_panel_layer.value_at("canvas_enabled", self.current_ms))
             state_label = "ENABLED · empty LEDs transparent" if enabled else "DISABLED · empty LEDs black"
@@ -5419,6 +6122,16 @@ class Editor:
             y += 28
             self.screen.blit(self.small.render("Drag a shape tool onto the playfield.", True, (116, 124, 142)), (x, y))
 
+        content_height = y - (content_top - self.inspector_scroll)
+        self.inspector_max_scroll = max(0, content_height - (content_bottom - content_top))
+        self.buttons[buttons_before:] = [
+            (rect, action, label) for rect, action, label in self.buttons[buttons_before:]
+            if rect.bottom > content_top and rect.top < content_bottom
+        ]
+        self.screen.set_clip(old_clip)
+        if self.inspector_max_scroll > 0:
+            self._draw_inspector_scrollbar(panel, content_top, content_bottom)
+
         pygame.draw.rect(self.screen, (22, 25, 32), (panel.x, panel.bottom - 47, panel.width, 47))
         pygame.draw.line(
             self.screen, (58, 64, 78),
@@ -5428,27 +6141,77 @@ class Editor:
         status_text = self._fit_text(self.status, self.small, panel.width - 43)
         self.screen.blit(self.small.render(status_text, True, (171, 184, 204)), (x + 15, panel.bottom - 31))
 
-    def _draw_random_led_panel(self, panel: pygame.Rect, x: int) -> None:
-        effect = self._active_random_led_effect()
-        assert effect is not None
+    def _draw_inspector_scrollbar(self, panel: pygame.Rect, content_top: int, content_bottom: int) -> None:
+        track_height = content_bottom - content_top
+        gutter = pygame.Rect(panel.right - 6, content_top, 3, track_height)
+        pygame.draw.rect(self.screen, (48, 53, 65), gutter, border_radius=2)
+        total_height = track_height + self.inspector_max_scroll
+        handle_height = max(24, round(gutter.height * track_height / max(1, total_height)))
+        travel = gutter.height - handle_height
+        handle_y = gutter.y + round(travel * self.inspector_scroll / max(1, self.inspector_max_scroll))
+        pygame.draw.rect(
+            self.screen, (104, 126, 164),
+            pygame.Rect(gutter.x, handle_y, gutter.width, handle_height), border_radius=2,
+        )
+
+    def _draw_generator_menu(self) -> None:
+        anchor = self._generator_menu_anchor or pygame.Rect(self.screen.get_width() - 184, 100, 34, 25)
+        width = 200
+        row_height = 32
+        kinds = list(GENERATOR_KINDS.values())
+        menu = pygame.Rect(
+            min(anchor.x, self.screen.get_width() - width - 6), anchor.bottom + 4,
+            width, row_height * len(kinds) + 8,
+        )
+        pygame.draw.rect(self.screen, (36, 40, 50), menu, border_radius=6)
+        pygame.draw.rect(self.screen, (82, 89, 106), menu, 1, border_radius=6)
+        layer = self.project.layers[self.active_layer]
+        row_y = menu.y + 4
+        for kind in kinds:
+            row = pygame.Rect(menu.x + 4, row_y, width - 8, row_height - 4)
+            has_effect = bool(getattr(layer, kind.list_attr))
+            self._button(row, f"{kind.key}_editor", kind.menu_label, has_effect)
+            row_y += row_height
+
+    def _draw_generator_panel(self, panel: pygame.Rect, x: int, kind: str, effect: object) -> None:
+        info = GENERATOR_KINDS[kind]
         layer = self.project.layers[self.active_layer]
         enabled = bool(effect.value_at("enabled", self.current_ms))
 
         y = panel.y + 78
-        self.screen.blit(self.font.render("RANDOM LED / SPARKLE", True, (225, 229, 238)), (x, y))
-        self._button(pygame.Rect(panel.right - 82, y - 4, 68, 28), "random_led_back", "< Back", False)
+        self.screen.blit(self.font.render(info.title, True, (225, 229, 238)), (x, y))
+        self._button(pygame.Rect(panel.right - 82, y - 4, 68, 28), "generator_back", "< Back", False)
         y += 35
         self.screen.blit(self.small.render(f"Layer: {layer.name}", True, (118, 184, 255)), (x, y)); y += 28
-        self.screen.blit(self.small.render("Directly flashes random firmware LEDs.", True, (154, 162, 180)), (x, y)); y += 20
-        self.screen.blit(self.small.render("Layer shapes do not mask this effect.", True, (154, 162, 180)), (x, y)); y += 31
+        for line in info.description:
+            self.screen.blit(self.small.render(line, True, (154, 162, 180)), (x, y)); y += 20
+        y += 11
 
         self.screen.blit(self.small.render("Enabled", True, (172, 178, 193)), (x, y))
         state_color = (96, 220, 155) if enabled else (255, 112, 102)
         state = "ON" if enabled else "OFF"
         self.screen.blit(self.font.render(state, True, state_color), (x + 72, y - 3))
-        self._button(pygame.Rect(x + 132, y - 6, 68, 30), "random_led_toggle", "Toggle", enabled)
-        self._button(pygame.Rect(x + 207, y - 6, 68, 30), "random_led_keyframe", "State key", False)
+        self._button(pygame.Rect(x + 132, y - 6, 68, 30), "generator_toggle", "Toggle", enabled)
+        self._button(pygame.Rect(x + 207, y - 6, 68, 30), "generator_keyframe", "State key", False)
         y += 42
+
+        if info.has_direction:
+            forward = getattr(effect, "direction", 1) >= 0
+            self.screen.blit(self.small.render("Direction", True, (172, 178, 193)), (x, y))
+            self._button(
+                pygame.Rect(x + 132, y - 6, 143, 30), "generator_toggle_direction",
+                "Forward" if forward else "Reverse", True,
+            )
+            y += 42
+
+        if info.has_blackout:
+            blackout = bool(getattr(effect, "blackout", False))
+            self.screen.blit(self.small.render("Flash", True, (172, 178, 193)), (x, y))
+            self._button(
+                pygame.Rect(x + 132, y - 6, 143, 30), "generator_toggle_blackout",
+                "Blackout (cut)" if blackout else "Color", True,
+            )
+            y += 42
 
         def parameter_row(prop: str, value: float | int) -> None:
             nonlocal y
@@ -5459,31 +6222,25 @@ class Editor:
                 for frame in effect.keyframes.get("opacity", [])
             )
             self._numeric_property_widget(
-                row, RANDOM_LED_PROPERTY_SPECS[prop], value,
-                f"random_led_field:{prop}",
+                row, info.specs[prop], value,
+                f"generator_field:{prop}",
                 editing=editing,
                 input_text=self.random_effect_input if editing else "",
-                key_action="random_led_opacity_keyframe" if prop == "opacity" else None,
+                key_action="generator_opacity_keyframe" if prop == "opacity" else None,
                 key_active=has_key,
             )
             y += 42
 
-        parameter_row("seed", effect.seed)
-        parameter_row("life_ms", effect.life_ms)
-        parameter_row("born_speed", effect.born_speed)
-        parameter_row("particle_count", effect.particle_count)
+        for prop in info.param_props:
+            parameter_row(prop, getattr(effect, prop))
         parameter_row("opacity", float(effect.value_at("opacity", self.current_ms)))
 
-        y += 5
-        self.screen.blit(self.small.render("Flash color", True, (172, 178, 193)), (x, y)); y += 25
-        for index, color in enumerate(PALETTE):
-            rect = pygame.Rect(x + index * 34, y, 27, 27)
-            pygame.draw.rect(self.screen, color, rect, border_radius=4)
-            if effect.color == color:
-                pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
-            self.buttons.append((rect, f"color:{index}", "Random LED color"))
+        if info.has_color:
+            y += 5
+            self.screen.blit(self.small.render("Color", True, (172, 178, 193)), (x, y)); y += 25
+            y = self._draw_color_palette(x, y, effect.color)
 
-        y += 48
+        y += 14
         enabled_keys = len(effect.keyframes.get("enabled", []))
         opacity_keys = len(effect.keyframes.get("opacity", []))
         self.screen.blit(
@@ -5496,7 +6253,7 @@ class Editor:
             (x, y),
         )
         y += 29
-        self._button(pygame.Rect(x, y, 275, 30), "random_led_delete", "Remove Random LED effect", False)
+        self._button(pygame.Rect(x, y, 275, 30), "generator_delete", f"Remove {info.menu_label} effect", False)
 
         pygame.draw.rect(self.screen, (25, 28, 35), (panel.x, panel.bottom - 47, panel.width, 47))
         self.screen.blit(self.small.render(self.status[:42], True, (100, 216, 162)), (x, panel.bottom - 29))
@@ -5522,9 +6279,12 @@ class Editor:
         self.screen.blit(self.small.render("Type", True, (172, 178, 193)), (x, y)); y += 22
         gradient_type = state.get("gradient_type", "solid")
         radial_mode = state.get("gradient_radial_mode", "radius")
-        for index, (value, label) in enumerate((("solid", "Solid"), ("linear", "Linear"), ("radial", "Radial"))):
+        gradient_type_options = (
+            ("solid", "Solid"), ("linear", "Linear"), ("radial", "Radial"), ("noise", "Noise"),
+        )
+        for index, (value, label) in enumerate(gradient_type_options):
             self._button(
-                pygame.Rect(x + index * 93, y, 86, 30), f"gradient_type:{value}", label,
+                pygame.Rect(x + index * 70, y, 63, 30), f"gradient_type:{value}", label,
                 gradient_type == value,
             )
 
@@ -5595,14 +6355,11 @@ class Editor:
         palette_y = slider.bottom + 44
         self.screen.blit(self.small.render("Selected stop color", True, (172, 178, 193)), (x, palette_y))
         palette_y += 25
-        for index, color in enumerate(PALETTE):
-            rect = pygame.Rect(x + index * 34, palette_y, 27, 27)
-            pygame.draw.rect(self.screen, color, rect, border_radius=4)
-            if selected_stop and selected_stop.color == color:
-                pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
-            self.buttons.append((rect, f"color:{index}", "Gradient stop color"))
+        palette_y = self._draw_color_palette(
+            x, palette_y, selected_stop.color if selected_stop else (255, 255, 255),
+        )
 
-        tips_y = palette_y + 55
+        tips_y = palette_y + 20
         tips = [
             "Click the color bar to add a stop.",
             "Drag any stop freely along the bar.",
@@ -5755,7 +6512,12 @@ class Editor:
 
     def _export_bank_panel_rect(self) -> pygame.Rect:
         width = min(1120, self.screen.get_width() - 50)
-        height = min(720, self.screen.get_height() - 50)
+        # 800 (not 720) so the SELECTED EFFECT detail panel's frame is tall
+        # enough for its tallest content - badge/name/ID fields + 7 metadata
+        # rows + the "Load editable project"/"Remove from export bank"
+        # buttons - without the buttons spilling past the frame's bottom
+        # edge (see _export_bank_layout).
+        height = min(800, self.screen.get_height() - 50)
         panel = pygame.Rect(0, 0, width, height)
         panel.center = self.screen.get_rect().center
         return panel
@@ -5968,10 +6730,99 @@ class Editor:
 
     def _help_panel_rect(self) -> pygame.Rect:
         width = min(980, self.screen.get_width() - 60)
-        height = min(700, self.screen.get_height() - 60)
+        # 824 (not 700) so the tallest column (LAYERS/CANVAS + VIEWPORT/
+        # SHAPES + LED MAP) fits above the footer line without its last
+        # rows spilling past the panel's own bottom edge.
+        height = min(824, self.screen.get_height() - 60)
         panel = pygame.Rect(0, 0, width, height)
         panel.center = self.screen.get_rect().center
         return panel
+
+    def _color_picker_panel_rect(self) -> pygame.Rect:
+        width = min(360, self.screen.get_width() - 60)
+        height = min(320, self.screen.get_height() - 60)
+        panel = pygame.Rect(0, 0, width, height)
+        panel.center = self.screen.get_rect().center
+        return panel
+
+    def _color_slider_rect(self, panel: pygame.Rect, channel: int) -> pygame.Rect:
+        return pygame.Rect(panel.x + 24, panel.y + 148 + channel * 44, panel.width - 48, 20)
+
+    def _set_color_channel_from_x(self, channel: int, screen_x: int) -> None:
+        slider = self._color_slider_rect(self._color_picker_panel_rect(), channel)
+        ratio = max(0.0, min(1.0, (screen_x - slider.x) / max(1, slider.width)))
+        self.color_picker_rgb[channel] = round(ratio * 255)
+
+    def _draw_color_picker(self) -> None:
+        shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        shade.fill((7, 9, 13, 222))
+        self.screen.blit(shade, (0, 0))
+        panel = self._color_picker_panel_rect()
+        pygame.draw.rect(self.screen, (25, 28, 36), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (77, 84, 102), panel, 1, border_radius=10)
+        x, y = panel.x + 24, panel.y + 20
+        self.screen.blit(self.title.render("Color Mixer", True, (238, 241, 248)), (x, y))
+        self._button(pygame.Rect(panel.right - 66, y - 6, 42, 32), "close_color_picker", "×", False)
+
+        color = tuple(self.color_picker_rgb)
+        preview = pygame.Rect(x, y + 38, panel.width - 48, 56)
+        pygame.draw.rect(self.screen, color, preview, border_radius=6)
+        pygame.draw.rect(self.screen, (90, 96, 112), preview, 1, border_radius=6)
+        hex_label = self.small.render(f"RGB {color}", True, (200, 205, 216))
+        self.screen.blit(hex_label, hex_label.get_rect(center=preview.center))
+
+        labels = ("R", "G", "B")
+        accents = ((235, 90, 80), (90, 210, 120), (95, 150, 235))
+        for channel, label in enumerate(labels):
+            slider = self._color_slider_rect(panel, channel)
+            value = self.color_picker_rgb[channel]
+            self.screen.blit(
+                self.small.render(f"{label}   {value}", True, (172, 178, 193)),
+                (slider.x, slider.y - 18),
+            )
+            pygame.draw.rect(self.screen, (40, 44, 54), slider, border_radius=4)
+            fill_width = round(slider.width * value / 255)
+            if fill_width > 0:
+                pygame.draw.rect(
+                    self.screen, accents[channel], (slider.x, slider.y, fill_width, slider.height),
+                    border_radius=4,
+                )
+            pygame.draw.rect(self.screen, (78, 84, 100), slider, 1, border_radius=4)
+            self.buttons.append((slider.inflate(0, 14), f"color_slider:{channel}", f"{label} channel"))
+
+        apply_rect = pygame.Rect(x, panel.bottom - 56, panel.width - 48, 32)
+        self._button(apply_rect, "apply_color_picker", "Apply & save to custom colors", True)
+
+    def _handle_color_picker_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.color_picker_open = False
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            action = next(
+                (
+                    action for rect, action, _label in reversed(self.buttons)
+                    if rect.collidepoint(event.pos)
+                ),
+                None,
+            )
+            if action == "close_color_picker":
+                self.color_picker_open = False
+            elif action == "apply_color_picker":
+                self._begin_change()
+                self._apply_custom_color(tuple(self.color_picker_rgb))
+                self._commit_change()
+                self.color_picker_open = False
+            elif action and action.startswith("color_slider:"):
+                channel = int(action.split(":", 1)[1])
+                self.drag_mode = f"color_slider:{channel}"
+                self._set_color_channel_from_x(channel, event.pos[0])
+            return
+        if event.type == pygame.MOUSEMOTION and (self.drag_mode or "").startswith("color_slider:"):
+            channel = int(self.drag_mode.split(":", 1)[1])
+            self._set_color_channel_from_x(channel, event.pos[0])
+            return
+        if event.type == pygame.MOUSEBUTTONUP and (self.drag_mode or "").startswith("color_slider:"):
+            self.drag_mode = None
 
     def _draw_help(self) -> None:
         shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
@@ -6021,6 +6872,12 @@ class Editor:
         footer_surface = self.small.render(footer, True, (112, 123, 145))
         self.screen.blit(footer_surface, (x, panel.bottom - 31))
 
+        version_text = f"v{APP_VERSION}" + (f" · {self.git_commit}" if self.git_commit else "")
+        version_surface = self.small.render(version_text, True, (112, 123, 145))
+        self.screen.blit(
+            version_surface, (panel.right - version_surface.get_width() - 28, panel.bottom - 31),
+        )
+
     def _draw_export_bank(self) -> None:
         shade = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         shade.fill((7, 9, 13, 218))
@@ -6035,6 +6892,12 @@ class Editor:
             True, (143, 153, 174),
         )
         self.screen.blit(subtitle, (x, y + 31))
+        backup_path = self._export_bank_backup_path(self.export_bank_path or EXPORT_FILE)
+        if backup_path.is_file():
+            self._button(
+                pygame.Rect(panel.right - 480, y, 126, 32),
+                "export_bank_restore_backup", "Restore backup", False,
+            )
         self._button(pygame.Rect(panel.right - 344, y, 126, 32), "export_bank_map", "Map header…", False)
         errors = self._export_bank_validation_errors()
         self._button(
@@ -6073,8 +6936,8 @@ class Editor:
             memory, 2 if used > EFFECT_BANK_CAPACITY else 1, border_radius=6,
         )
         entries = [
-            (-1, self.project.name, self.project.flash_bytes),
             *[(index, effect.name, effect.flash_bytes) for index, effect in enumerate(self.export_bank_effects)],
+            (-1, self.project.name, self.project.flash_bytes),
         ]
         old_clip = self.screen.get_clip()
         self.screen.set_clip(memory.inflate(-2, -2))
@@ -6127,12 +6990,9 @@ class Editor:
             )
             self.screen.blit(count_surface, (toolbar.right - count_surface.get_width(), toolbar.y + 8))
 
-        # Keeps a bank effect's colour block the same in the (always
-        # unfiltered) memory bar above and in this filtered/sorted list.
-        order_by_index = {index: order for order, (index, _name, _bytes) in enumerate(entries)}
         list_entries = [
-            (-1, self.project.name, self.project.flash_bytes),
             *[(index, effect.name, effect.flash_bytes) for index, effect in visible_pairs],
+            (-1, self.project.name, self.project.flash_bytes),
         ]
 
         self.screen.blit(self.font.render("BANK CONTENT", True, (211, 216, 228)), (list_rect.x, list_rect.y - 29))
@@ -6151,7 +7011,7 @@ class Editor:
             row = pygame.Rect(list_rect.x + 7, list_rect.y + 7 + visible_index * 53, list_rect.width - 14, 46)
             selected = entry_index == self.export_bank_selected
             pygame.draw.rect(self.screen, (47, 58, 78) if selected else (31, 35, 44), row, border_radius=5)
-            color = BANK_COLORS[order_by_index[entry_index] % len(BANK_COLORS)]
+            color = BANK_COLORS[self._export_bank_color_index(entry_index) % len(BANK_COLORS)]
             bar_width = max(3, round(byte_count / EFFECT_BANK_CAPACITY * (row.width - 8)))
             pygame.draw.rect(self.screen, color, (row.x + 4, row.bottom - 7, min(row.width - 8, bar_width), 3), border_radius=2)
             if entry_index == -1:
@@ -6161,8 +7021,23 @@ class Editor:
                 effect = self.export_bank_effects[entry_index]
                 effect_id, frames, timing = effect.effect_id, len(effect.frames), effect.frame_ms
                 marker = "BANK+PROJECT" if effect.project_data is not None else "BANK"
-            label = self._fit_text(f"{marker}  ·  ID {effect_id}  ·  {name}", self.small, row.width - 178)
-            self.screen.blit(self.small.render(label, True, (232, 235, 242)), (row.x + 9, row.y + 7))
+
+            thumb_size = 34
+            thumb_rect = pygame.Rect(row.x + 5, row.y + 4, thumb_size, thumb_size)
+            pygame.draw.rect(self.screen, (14, 16, 21), thumb_rect, border_radius=4)
+            thumbnail = (
+                self._render_led_thumbnail(self._preview_led_colors(), thumb_size)
+                if entry_index == -1 else self._effect_thumbnail(effect, thumb_size)
+            )
+            self.screen.blit(thumbnail, thumb_rect.topleft)
+            pygame.draw.rect(self.screen, (57, 63, 77), thumb_rect, 1, border_radius=4)
+
+            label_x = thumb_rect.right + 10
+            label = self._fit_text(
+                f"{marker}  ·  ID {effect_id}  ·  {name}", self.small,
+                max(20, row.right - label_x - 90),
+            )
+            self.screen.blit(self.small.render(label, True, (232, 235, 242)), (label_x, row.y + 7))
             stats = f"{byte_count / 1024:.1f}K  {frames * timing / 1000:.2f}s"
             stats_surface = self.small.render(stats, True, (159, 168, 187))
             self.screen.blit(stats_surface, (row.right - stats_surface.get_width() - 9, row.y + 7))
@@ -6189,7 +7064,8 @@ class Editor:
         byte_count = self.project.flash_bytes if current else effect.flash_bytes
         x, y = detail.x + 14, detail.y + 16
         badge = "CURRENT PROJECT" if current else "MAPPED HEADER EFFECT"
-        self.screen.blit(self.small.render(badge, True, BANK_COLORS[0 if current else (self.export_bank_selected + 1) % len(BANK_COLORS)]), (x, y))
+        color_index = self._export_bank_color_index(-1 if current else self.export_bank_selected)
+        self.screen.blit(self.small.render(badge, True, BANK_COLORS[color_index % len(BANK_COLORS)]), (x, y))
         y += 35
         self.screen.blit(self.small.render("Name", True, (143, 152, 171)), (x, y))
         name_field = pygame.Rect(x, y + 18, detail.width - 28, 34)
@@ -6225,19 +7101,25 @@ class Editor:
             rendered = self.small.render(value, True, (220, 225, 235))
             self.screen.blit(rendered, (detail.right - rendered.get_width() - 14, y))
             y += 20
+        y += 14
+        # Placed right after the metadata block (not anchored to detail.bottom)
+        # so they can never slide up and overlap the last metadata rows on a
+        # shorter panel - that anchoring is what caused the overlap before.
         if not current:
             if effect.project_data is not None:
                 self._button(
-                    pygame.Rect(x, detail.bottom - 86, detail.width - 28, 32),
+                    pygame.Rect(x, y, detail.width - 28, 32),
                     "export_bank_load_project", "Load editable project", True,
                 )
+                y += 40
             else:
                 self.screen.blit(
                     self.small.render("No project bundle in this header effect", True, (132, 141, 160)),
-                    (x, detail.bottom - 76),
+                    (x, y + 8),
                 )
+                y += 32
             self._button(
-                pygame.Rect(x, detail.bottom - 48, detail.width - 28, 32),
+                pygame.Rect(x, y, detail.width - 28, 32),
                 "export_bank_remove", "Remove from export bank", False,
             )
 
@@ -6309,6 +7191,41 @@ class Editor:
             )
         return field
 
+    def _draw_color_palette(self, x: int, y: int, current_color: tuple[int, int, int]) -> int:
+        """Draws the built-in palette (2 rows of 8), the personal custom-
+        colour row, and a "+" swatch that opens the mixer - shared by the
+        shape/random-LED/gradient-stop colour sections so all three stay in
+        sync. Returns the y position right after everything drawn, so the
+        caller can keep laying out further controls below it."""
+        current_color = tuple(current_color)
+        for row in range(2):
+            for col in range(8):
+                index = row * 8 + col
+                color = PALETTE[index]
+                rect = pygame.Rect(x + col * 34, y + row * 34, 27, 27)
+                pygame.draw.rect(self.screen, color, rect, border_radius=4)
+                if current_color == color:
+                    pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
+                self.buttons.append((rect, f"color:{index}", ""))
+        y += 2 * 34 + 12
+        for index, color in enumerate(self.custom_colors):
+            color = tuple(color)
+            rect = pygame.Rect(x + index * 34, y, 27, 27)
+            pygame.draw.rect(self.screen, color, rect, border_radius=4)
+            if current_color == color:
+                pygame.draw.rect(self.screen, (245, 247, 252), rect.inflate(4, 4), 2, border_radius=5)
+            self.buttons.append((rect, f"custom_color:{index}", ""))
+        edit_rect = pygame.Rect(x + len(self.custom_colors) * 34, y, 27, 27)
+        pygame.draw.rect(self.screen, (45, 49, 61), edit_rect, border_radius=4)
+        pygame.draw.rect(
+            self.screen, ACCENT if edit_rect.collidepoint(pygame.mouse.get_pos()) else (110, 118, 136),
+            edit_rect, 1, border_radius=4,
+        )
+        plus = self.small.render("+", True, (216, 221, 232))
+        self.screen.blit(plus, plus.get_rect(center=edit_rect.center))
+        self.buttons.append((edit_rect, "open_color_picker", "Mix a custom color"))
+        return y + 27
+
     def _button(self, rect: pygame.Rect, action: str, label: str, active: bool) -> None:
         hovered = rect.collidepoint(pygame.mouse.get_pos())
         action_base = action.split(":", 1)[0]
@@ -6351,6 +7268,16 @@ class Editor:
         center_x, center_y = rect.center
         if icon == "stop":
             pygame.draw.rect(self.screen, ink, pygame.Rect(center_x - 5, center_y - 5, 10, 10))
+        elif icon == "loop":
+            pygame.draw.line(
+                self.screen, ink, (center_x - 8, center_y - 7), (center_x - 8, center_y + 7), 2,
+            )
+            pygame.draw.line(
+                self.screen, ink, (center_x + 8, center_y - 7), (center_x + 8, center_y + 7), 2,
+            )
+            pygame.draw.polygon(self.screen, ink, [
+                (center_x - 3, center_y - 6), (center_x + 4, center_y), (center_x - 3, center_y + 6),
+            ])
         else:
             points = (
                 [(center_x - 5, center_y - 7), (center_x + 7, center_y), (center_x - 5, center_y + 7)]
@@ -6372,6 +7299,7 @@ class Editor:
             pygame.draw.polygon(self.screen, ink, points)
         label = {
             "previous": "Previous frame", "play": "Play", "stop": "Stop", "next": "Next frame",
+            "loop": "Play Loop",
         }[icon]
         self.buttons.append((rect, action, label))
 
@@ -6387,6 +7315,54 @@ def _parse_resolution(value: str) -> tuple[int, int]:
             f"Resolution must be at least {MIN_WINDOW_SIZE[0]}x{MIN_WINDOW_SIZE[1]}"
         )
     return width, height
+
+
+@lru_cache(maxsize=4)
+def get_git_commit(repo_dir: str | Path = ROOT) -> str | None:
+    """Short commit hash of the running checkout, or None if git/the repo
+    isn't available (e.g. a packaged build with no .git directory). Used
+    for the Help panel's version line - knowing the exact commit matters
+    here since APP_VERSION is a hand-maintained string, not bumped for
+    every change, and the auto-updater can move a Pi to a new commit any
+    time it restarts.
+
+    Cached (per repo_dir): a real run only ever constructs one Editor, but
+    the test suite constructs hundreds - without caching, each one shells
+    out to git and roughly doubles the suite's runtime for no benefit."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(repo_dir), capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
+def format_crash_entry(exc: BaseException) -> str:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    body = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    return f"{_CRASH_LOG_SEPARATOR}[{timestamp}]\n{body}"
+
+
+def log_crash(exc: BaseException, path: str | Path = CRASH_LOG_FILE) -> None:
+    """Append a timestamped traceback to a small rolling crash log (never
+    grows unbounded - only the last CRASH_LOG_MAX_ENTRIES are kept) so a
+    crash on a headless Pi (stderr goes nowhere visible) leaves a trail
+    instead of just vanishing. Best-effort: logging itself must never be
+    what crashes the crash handler."""
+    path = Path(path)
+    entry = format_crash_entry(exc)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        previous_entries = [part for part in existing.split(_CRASH_LOG_SEPARATOR) if part.strip()]
+        kept = previous_entries[-(CRASH_LOG_MAX_ENTRIES - 1):]
+        rebuilt = "".join(_CRASH_LOG_SEPARATOR + part for part in kept)
+        path.write_text(rebuilt + entry, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def main() -> None:
@@ -6425,6 +7401,7 @@ def main() -> None:
     screen = pygame.display.set_mode(args.resolution, flags)
     pygame.display.set_caption("CnC Pinball — Light Effect Editor")
     restart_requested = False
+    editor: Editor | None = None
     try:
         editor = Editor(
             screen,
@@ -6438,6 +7415,14 @@ def main() -> None:
             args.screenshot,
             auto_update=not args.no_auto_update,
         )
+    except Exception as exc:
+        log_crash(exc)
+        if editor is not None:
+            try:
+                editor._maybe_autosave(force=True)
+            except Exception:
+                pass  # the crash log already has the real error - don't mask it
+        raise
     finally:
         pygame.quit()
     if restart_requested:

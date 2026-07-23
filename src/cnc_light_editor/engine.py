@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from math import atan2, cos, degrees, radians, sin, sqrt
+import colorsys
+from math import atan2, cos, degrees, pi, radians, sin, sqrt
 import random
 from typing import Iterable
 
@@ -71,7 +72,9 @@ def render_leds_with_mask(
         if layer_opacity <= 0.0:
             continue
         shape_states = [(shape, shape.state_at(time_ms)) for shape in layer.shapes]
-        random_led_overlays = _random_led_overlays(layer, points, time_ms)
+        generator_overlays = [
+            overlay_func(layer, points, time_ms) for overlay_func in _GENERATOR_OVERLAY_FUNCS
+        ]
         for point_index, point in enumerate(points):
             color = result[point_index]
             for shape, state in shape_states:
@@ -87,14 +90,15 @@ def render_leds_with_mask(
                 )
                 if alpha <= 0.0:
                     continue
-                src = gradient_color(state, point)
+                src = gradient_color(state, point, time_ms)
                 color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
                 painted[point_index] = True
-            for src, alpha in random_led_overlays[point_index]:
-                alpha *= layer_opacity
-                color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
-                if alpha > 0.0:
-                    painted[point_index] = True
+            for overlays in generator_overlays:
+                for src, alpha in overlays[point_index]:
+                    alpha *= layer_opacity
+                    color = tuple(src[i] * alpha + color[i] * (1.0 - alpha) for i in range(3))
+                    if alpha > 0.0:
+                        painted[point_index] = True
             result[point_index] = color
     colors = [
         tuple(max(0, min(255, int(round(channel)))) for channel in color)
@@ -137,11 +141,142 @@ def _random_led_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, 
     return overlays
 
 
-def gradient_color(state: dict, point: tuple[float, float]) -> Color:
+def _strobe_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, float]]]:
+    overlays: list[list[tuple[Color, float]]] = [[] for _point in points]
+    if not layer.strobe_effects:
+        return overlays
+    for effect in layer.strobe_effects:
+        if not effect.value_at("enabled", time_ms):
+            continue
+        effect_opacity = max(0.0, min(1.0, float(effect.value_at("opacity", time_ms))))
+        if effect_opacity <= 0.0:
+            continue
+        period_ms = 1000.0 / max(0.01, effect.frequency_hz)
+        phase = (time_ms % period_ms) / period_ms
+        if phase >= max(0.0, min(1.0, effect.duty_cycle)):
+            continue
+        # Blackout mode flashes black instead of a color, cutting into
+        # whatever the layer's other shapes/effects are already animating
+        # rather than adding a flash on top of them.
+        flash_color = (0, 0, 0) if effect.blackout else effect.color
+        for overlay in overlays:
+            overlay.append((flash_color, effect_opacity))
+    return overlays
+
+
+def _color_cycle_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, float]]]:
+    overlays: list[list[tuple[Color, float]]] = [[] for _point in points]
+    total = len(points)
+    if not layer.color_cycle_effects or total == 0:
+        return overlays
+    for effect in layer.color_cycle_effects:
+        if not effect.value_at("enabled", time_ms):
+            continue
+        effect_opacity = max(0.0, min(1.0, float(effect.value_at("opacity", time_ms))))
+        if effect_opacity <= 0.0:
+            continue
+        direction = 1.0 if effect.direction >= 0 else -1.0
+        base_hue = (time_ms / 1000.0 * effect.speed_hz * direction) % 1.0
+        saturation = max(0.0, min(1.0, effect.saturation))
+        brightness = max(0.0, min(1.0, effect.brightness))
+        spread = max(0.0, min(1.0, effect.spread))
+        for index in range(total):
+            hue = (base_hue + (index / total) * spread) % 1.0
+            red, green, blue = colorsys.hsv_to_rgb(hue, saturation, brightness)
+            color = (round(red * 255), round(green * 255), round(blue * 255))
+            overlays[index].append((color, effect_opacity))
+    return overlays
+
+
+def _pulse_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, float]]]:
+    overlays: list[list[tuple[Color, float]]] = [[] for _point in points]
+    if not layer.pulse_effects:
+        return overlays
+    for effect in layer.pulse_effects:
+        if not effect.value_at("enabled", time_ms):
+            continue
+        effect_opacity = max(0.0, min(1.0, float(effect.value_at("opacity", time_ms))))
+        if effect_opacity <= 0.0:
+            continue
+        period_ms = max(1.0, effect.period_ms)
+        depth = max(0.0, min(1.0, effect.depth))
+        phase = (time_ms % period_ms) / period_ms
+        wave = (1.0 - cos(2.0 * pi * phase)) / 2.0
+        alpha = effect_opacity * max(0.0, min(1.0, 1.0 - depth * wave))
+        if alpha <= 0.0:
+            continue
+        for overlay in overlays:
+            overlay.append((effect.color, alpha))
+    return overlays
+
+
+def _comet_overlays(layer, points, time_ms: int) -> list[list[tuple[Color, float]]]:
+    overlays: list[list[tuple[Color, float]]] = [[] for _point in points]
+    total = len(points)
+    if not layer.comet_effects or total == 0:
+        return overlays
+    for effect in layer.comet_effects:
+        if not effect.value_at("enabled", time_ms):
+            continue
+        effect_opacity = max(0.0, min(1.0, float(effect.value_at("opacity", time_ms))))
+        if effect_opacity <= 0.0:
+            continue
+        direction = 1.0 if effect.direction >= 0 else -1.0
+        trail = max(0.1, effect.trail_length)
+        position = (time_ms / 1000.0 * effect.speed * direction) % total
+        for index in range(total):
+            distance = abs(index - position)
+            distance = min(distance, total - distance)
+            if distance >= trail:
+                continue
+            alpha = effect_opacity * (1.0 - distance / trail)
+            if alpha > 0.0:
+                overlays[index].append((effect.color, alpha))
+    return overlays
+
+
+_GENERATOR_OVERLAY_FUNCS = (
+    _random_led_overlays, _strobe_overlays, _color_cycle_overlays, _pulse_overlays, _comet_overlays,
+)
+
+
+def _hash32(value: int) -> int:
+    # A murmur3-style finalizer: fully diffuses the input bits so a small
+    # modulo (picking 1-of-N stop colors) isn't correlated with parity or
+    # other low-bit patterns in the raw combined seed/position/time value.
+    value &= 0xFFFFFFFF
+    value ^= value >> 16
+    value = (value * 0x7FEB352D) & 0xFFFFFFFF
+    value ^= value >> 15
+    value = (value * 0x846CA68B) & 0xFFFFFFFF
+    value ^= value >> 16
+    return value
+
+
+def noise_color(
+    seed: int, point: tuple[float, float], time_ms: int, stops: list,
+) -> Color:
+    # Each LED independently snaps to one of the shape's stop colors, and a
+    # new (seed, LED, frame) combination is hashed every call - since export
+    # samples one call per stored frame, this reads as flickering TV static
+    # rather than a smoothly interpolated gradient.
+    grid_x = round(point[0] * 4001)
+    grid_y = round(point[1] * 4001)
+    combined = (
+        seed * 2654435761 ^ grid_x * 40503 ^ grid_y * 2246822519 ^ int(time_ms) * 374761393
+    ) & 0xFFFFFFFF
+    mixed = _hash32(combined)
+    ordered = sorted(stops, key=lambda stop: stop.position)
+    return tuple(ordered[mixed % len(ordered)].color)
+
+
+def gradient_color(state: dict, point: tuple[float, float], time_ms: int = 0) -> Color:
     gradient_type = state.get("gradient_type", "solid")
     stops = state.get("gradient_stops", [])
     if gradient_type == "solid" or len(stops) < 2:
         return tuple(state["color"])
+    if gradient_type == "noise":
+        return noise_color(state.get("noise_seed", 0), point, time_ms, stops)
 
     x, y = _local_point(state, point)
     half_w = max(float(state["width"]) / 2, 0.0001)

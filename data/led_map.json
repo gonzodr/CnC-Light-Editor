@@ -4,8 +4,8 @@
     "width": 3043,
     "height": 6305
   },
-  "mapping_status": "calibration_in_progress",
-  "notes": "68 firmware slots. NULL entries are reserved zero-output slots; the map remains in calibration.",
+  "mapping_status": "hardware_verified",
+  "notes": "68 firmware slots. NULL entries are reserved zero-output slots. Hardware-verified 2026-07-23.",
   "leds": [
     {
       "id": 0,

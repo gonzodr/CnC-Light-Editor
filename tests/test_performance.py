@@ -1,6 +1,7 @@
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")  # see test_editor_interactions.py for why
 
 import pygame
 
@@ -179,6 +180,68 @@ def test_playback_keeps_rendering_at_preview_ticks(monkeypatch):
     assert editor.current_ms == 300
 
 
+def test_plain_play_loops_the_whole_sequence_forever(monkeypatch):
+    editor = make_editor()
+    editor.project.duration_ms = 250
+    editor.playing = True
+    editor.loop_playback = False
+
+    class FiniteClock:
+        def __init__(self):
+            self.ticks = 0
+
+        def tick(self, _fps):
+            self.ticks += 1
+            if self.ticks >= 8:
+                editor.exit_requested = True
+            return 50
+
+    editor.clock = FiniteClock()
+    editor.draw = lambda: None
+    monkeypatch.setattr(pygame.event, "get", lambda: [])
+    monkeypatch.setattr(pygame.display, "flip", lambda: None)
+
+    editor.run(auto_update=False)
+
+    # 8 ticks * 50ms = 400ms travelled against a 250ms duration -> wrapped to 150ms.
+    # Plain Play never stops - it keeps looping the whole stored sequence.
+    assert editor.playing is True
+    assert editor.current_ms == 150
+
+
+def test_play_loop_repeats_only_the_loop_section(monkeypatch):
+    editor = make_editor()
+    editor.project.duration_ms = 1000
+    editor.project.frame_ms = 50
+    editor.project.intro_frames = 2  # loop section starts at 100ms
+    editor.project.loop_frames = 10  # loop section ends at 500ms
+    editor.playing = True
+    editor.loop_playback = True
+    editor.current_ms = 0  # outside the loop section - must self-correct
+
+    class FiniteClock:
+        def __init__(self):
+            self.ticks = 0
+
+        def tick(self, _fps):
+            self.ticks += 1
+            if self.ticks >= 8:
+                editor.exit_requested = True
+            return 50
+
+    editor.clock = FiniteClock()
+    editor.draw = lambda: None
+    monkeypatch.setattr(pygame.event, "get", lambda: [])
+    monkeypatch.setattr(pygame.display, "flip", lambda: None)
+
+    editor.run(auto_update=False)
+
+    # Snaps into [100, 500) on the first tick, then 8 * 50ms = 400ms (exactly
+    # one full lap of the 400ms-long loop section) brings it back to 100.
+    assert editor.playing is True
+    assert editor.current_ms == 100
+
+
 def test_glow_sprites_reuse_quantized_color_surfaces():
     editor = make_editor()
 
@@ -188,13 +251,24 @@ def test_glow_sprites_reuse_quantized_color_surfaces():
     assert first is second
 
 
-def test_compact_toolbar_keeps_actions_clear_of_duration_control():
+def test_timeline_length_control_fits_beside_transport_buttons_at_min_width():
+    # The Length control (input + slider) lives in the timeline's header row
+    # now, next to the transport buttons, instead of the top toolbar - this
+    # checks it still fits there, without overlap, at the editor's smallest
+    # supported window.
     pygame.init()
     screen = pygame.display.set_mode((1024, 720))
     editor = Editor(screen, check_recovery=False, target_fps=30)
 
     editor.draw()
+    _canvas, _panel, timeline = editor.layout()
 
-    main_actions = {"play", "keyframe", "stencil", "calibration", "save", "load", "export"}
-    action_rects = [rect for rect, action, _label in editor.buttons if action in main_actions]
-    assert max(rect.right for rect in action_rects) < editor._duration_input_rect().x
+    transport_rects = [
+        rect for rect, action, _label in editor.buttons
+        if action in {"step_frame:-1", "step_frame:1"}
+    ]
+    duration_field = next(rect for rect, action, _label in editor.buttons if action == "edit_duration")
+    duration_slider = next(rect for rect, action, _label in editor.buttons if action == "duration_slider")
+
+    assert max(rect.right for rect in transport_rects) < duration_field.x
+    assert duration_slider.right <= timeline.right

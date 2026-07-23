@@ -1,7 +1,17 @@
 import json
 
 from cnc_light_editor.engine import render_leds
-from cnc_light_editor.model import GradientStop, Layer, Project, RandomLedEffect, Shape
+from cnc_light_editor.model import (
+    ColorCycleEffect,
+    CometEffect,
+    GradientStop,
+    Layer,
+    Project,
+    PulseEffect,
+    RandomLedEffect,
+    Shape,
+    StrobeEffect,
+)
 
 
 def test_keyframes_interpolate_scale_and_color():
@@ -237,6 +247,30 @@ def test_v4_metadata_and_memory_estimates_round_trip(tmp_path):
     assert loaded.firmware_playback_ms == 9000
 
 
+def test_intro_frames_extend_firmware_playback_and_round_trip(tmp_path):
+    project = Project(
+        "intro then loop then outro", duration_ms=5000, effect_id=9, frame_ms=50,
+        loops=5, loop_frames=20, intro_frames=5,
+    )
+    path = tmp_path / "intro-metadata.cnclight"
+
+    assert project.normalized_intro_frames == 5
+    # 5 intro (once) + 15 loop-len * 5 loops + 80 outro = 160 steps * 50ms
+    assert project.firmware_playback_ms == 8000
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.intro_frames == 5
+    assert loaded.firmware_playback_ms == 8000
+
+
+def test_intro_frames_clamped_to_never_exceed_the_loop_end():
+    project = Project(duration_ms=1000, frame_ms=50, loop_frames=10, intro_frames=999)
+
+    assert project.normalized_intro_frames == 10
+
+
 def test_canvas_layer_enabled_state_is_stepped_keyframeable_and_persisted(tmp_path):
     canvas = Layer("Canvas", is_canvas=True, canvas_enabled=False)
     canvas.add_keyframe("canvas_enabled", 0, False)
@@ -402,3 +436,190 @@ def test_project_round_trip_preserves_random_led_settings(tmp_path):
     assert loaded_effect.color == (4, 5, 6)
     assert loaded_effect.opacity == 0.65
     assert loaded_effect.value_at("enabled", 800) is False
+
+
+def test_strobe_effect_flashes_on_and_off_at_its_duty_cycle():
+    effect = StrobeEffect(frequency_hz=2.0, duty_cycle=0.5, color=(255, 0, 0))
+    project = Project(layers=[Layer("fx", strobe_effects=[effect])])
+    points = [(0.1, 0.1), (0.9, 0.9)]
+
+    assert render_leds(project, points, 0) == [(255, 0, 0), (255, 0, 0)]
+    assert render_leds(project, points, 200) == [(255, 0, 0), (255, 0, 0)]
+    assert render_leds(project, points, 400) == [(0, 0, 0), (0, 0, 0)]
+
+
+def test_color_cycle_effect_spreads_a_rainbow_across_leds_and_rotates_with_time():
+    effect = ColorCycleEffect(speed_hz=0.25, spread=1.0, saturation=1.0, brightness=1.0)
+    project = Project(layers=[Layer("fx", color_cycle_effects=[effect])])
+    points = [(0.0, 0.0), (0.5, 0.5), (1.0, 1.0)]
+
+    first = render_leds(project, points, 0)
+    later = render_leds(project, points, 500)
+
+    assert len(set(first)) == len(points)
+    assert first != later
+
+
+def test_pulse_effect_breathes_brightness_between_peak_and_trough():
+    effect = PulseEffect(period_ms=1000, depth=1.0, color=(0, 255, 0))
+    project = Project(layers=[Layer("fx", pulse_effects=[effect])])
+    points = [(0.5, 0.5)]
+
+    assert render_leds(project, points, 0) == [(0, 255, 0)]
+    assert render_leds(project, points, 500) == [(0, 0, 0)]
+
+
+def test_comet_effect_moves_a_fading_trail_along_the_led_order():
+    effect = CometEffect(speed=10.0, trail_length=3.0, color=(0, 0, 255), direction=1)
+    points = [(index / 67.0, 0.5) for index in range(68)]
+    project = Project(layers=[Layer("fx", comet_effects=[effect])])
+
+    lit_at_start = [index for index, color in enumerate(render_leds(project, points, 0)) if color != (0, 0, 0)]
+    lit_later = [
+        index for index, color in enumerate(render_leds(project, points, 500)) if color != (0, 0, 0)
+    ]
+
+    assert lit_at_start
+    assert lit_at_start != lit_later
+
+
+def test_project_round_trip_preserves_all_generator_effect_kinds(tmp_path):
+    strobe = StrobeEffect(frequency_hz=3.0, duty_cycle=0.25)
+    color_cycle = ColorCycleEffect(speed_hz=0.5, spread=0.5, direction=-1)
+    pulse = PulseEffect(period_ms=800, depth=0.6)
+    comet = CometEffect(speed=20.0, trail_length=4.0, direction=-1)
+    project = Project(layers=[Layer(
+        "fx",
+        strobe_effects=[strobe], color_cycle_effects=[color_cycle],
+        pulse_effects=[pulse], comet_effects=[comet],
+    )])
+    path = tmp_path / "generator-effects.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+    layer = loaded.layers[0]
+
+    assert layer.strobe_effects[0].frequency_hz == 3.0
+    assert layer.strobe_effects[0].duty_cycle == 0.25
+    assert (layer.color_cycle_effects[0].speed_hz, layer.color_cycle_effects[0].direction) == (0.5, -1)
+    assert layer.pulse_effects[0].period_ms == 800
+    assert layer.comet_effects[0].trail_length == 4.0
+
+
+def test_wiggle_offsets_position_deterministically_and_only_when_enabled():
+    still = Shape("ellipse", "still", x=0.5, y=0.5, wiggle_enabled=False)
+    wiggly = Shape(
+        "ellipse", "wiggly", x=0.5, y=0.5,
+        wiggle_enabled=True, wiggle_amplitude=0.05, wiggle_speed=2.0, wiggle_seed=7,
+    )
+
+    assert still.state_at(100)["x"] == 0.5
+    assert still.state_at(100)["y"] == 0.5
+
+    first = wiggly.state_at(100)
+    second = wiggly.state_at(100)
+    later = wiggly.state_at(600)
+
+    assert (first["x"], first["y"]) == (second["x"], second["y"])
+    assert (first["x"], first["y"]) != (0.5, 0.5)
+    assert (first["x"], first["y"]) != (later["x"], later["y"])
+
+
+def test_wiggle_enabled_can_be_keyframed_like_visibility():
+    shape = Shape("ellipse", "wiggly", wiggle_enabled=False, wiggle_amplitude=0.1)
+    shape.add_keyframe("wiggle_enabled", 0, False)
+    shape.add_keyframe("wiggle_enabled", 200, True)
+
+    assert shape.state_at(100)["x"] == shape.x
+    assert shape.state_at(300)["x"] != shape.x
+
+
+def test_project_round_trip_preserves_wiggle_settings(tmp_path):
+    shape = Shape(
+        "ellipse", "wiggly", wiggle_enabled=True, wiggle_amplitude=0.07,
+        wiggle_speed=3.5, wiggle_seed=42,
+    )
+    project = Project(layers=[Layer("fx", shapes=[shape])])
+    path = tmp_path / "wiggle.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+    loaded_shape = loaded.layers[0].shapes[0]
+
+    assert loaded_shape.wiggle_enabled is True
+    assert loaded_shape.wiggle_amplitude == 0.07
+    assert loaded_shape.wiggle_speed == 3.5
+    assert loaded_shape.wiggle_seed == 42
+
+
+def test_noise_gradient_flickers_each_led_between_stop_colors_per_frame():
+    shape = Shape(
+        "rectangle", "static", width=1.0, height=1.0, gradient_type="noise",
+        gradient_stops=[GradientStop(0.0, (255, 0, 0)), GradientStop(1.0, (0, 0, 255))],
+        noise_seed=11,
+    )
+    project = Project(layers=[Layer("fx", shapes=[shape])])
+    points = [(index / 40.0, 0.5) for index in range(40)]
+
+    first = render_leds(project, points, 0)
+    again = render_leds(project, points, 0)
+    samples = [render_leds(project, points, time_ms) for time_ms in range(50, 550, 50)]
+
+    assert first == again
+    assert any(sample != first for sample in samples)
+    for color in first + [c for sample in samples for c in sample]:
+        assert color in {(255, 0, 0), (0, 0, 255)}
+
+
+def test_project_round_trip_preserves_noise_seed(tmp_path):
+    shape = Shape(
+        "ellipse", "noisy", gradient_type="noise", noise_seed=99,
+        gradient_stops=[GradientStop(0.0, (10, 20, 30)), GradientStop(1.0, (200, 210, 220))],
+    )
+    project = Project(layers=[Layer("fx", shapes=[shape])])
+    path = tmp_path / "noise.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.layers[0].shapes[0].noise_seed == 99
+    assert loaded.layers[0].shapes[0].gradient_type == "noise"
+
+
+def test_strobe_blackout_flashes_black_instead_of_its_color():
+    normal = StrobeEffect(frequency_hz=2.0, duty_cycle=0.5, color=(255, 0, 0))
+    blackout = StrobeEffect(frequency_hz=2.0, duty_cycle=0.5, color=(255, 0, 0), blackout=True)
+    points = [(0.1, 0.1), (0.9, 0.9)]
+
+    # On-phase (t=0): normal flashes its color, blackout cuts to black instead.
+    normal_project = Project(layers=[Layer("fx", strobe_effects=[normal])])
+    blackout_project = Project(layers=[Layer("fx", strobe_effects=[blackout])])
+    assert render_leds(normal_project, points, 0) == [(255, 0, 0), (255, 0, 0)]
+    assert render_leds(blackout_project, points, 0) == [(0, 0, 0), (0, 0, 0)]
+
+    # Off-phase (t=400, past the 50% duty cycle of a 500ms period): neither
+    # effect overlays anything, so both fall back to the empty black canvas.
+    assert render_leds(normal_project, points, 400) == [(0, 0, 0), (0, 0, 0)]
+    assert render_leds(blackout_project, points, 400) == [(0, 0, 0), (0, 0, 0)]
+
+
+def test_project_round_trip_preserves_strobe_blackout_flag(tmp_path):
+    effect = StrobeEffect(blackout=True)
+    project = Project(layers=[Layer("fx", strobe_effects=[effect])])
+    path = tmp_path / "strobe-blackout.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.layers[0].strobe_effects[0].blackout is True
+
+
+def test_state_at_includes_wiggle_amplitude_and_speed_for_the_scrub_widget():
+    # Regression: these were missing from state_at()'s dict, so the generic
+    # shape-property scrub handler crashed with a KeyError as soon as the
+    # user dragged either field (it seeds drag_shape_state from state_at()).
+    shape = Shape("ellipse", "wiggly", wiggle_amplitude=0.05, wiggle_speed=3.0)
+    state = shape.state_at(0)
+
+    assert state["wiggle_amplitude"] == 0.05
+    assert state["wiggle_speed"] == 3.0

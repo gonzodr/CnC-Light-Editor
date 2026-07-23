@@ -16,12 +16,13 @@ def test_export_pads_playfield_map_to_68_leds_and_writes_v4_metadata(tmp_path):
     effect = parse_effect_data(text)[0]
 
     assert "const uint8_t fx_launch_flash[] PROGMEM" in text
-    assert '{ 6, "Launch flash", fx_launch_flash, 2, 50, 3, 1, 1 }' in text
+    assert '{ 6, "Launch flash", fx_launch_flash, 2, 50, 3, 1, 1, 0 }' in text
     assert effect.effect_id == 6
     assert effect.frame_ms == 50
     assert effect.loops == 3
     assert effect.loop_frames == 1
     assert effect.overlay is True
+    assert effect.intro_frames == 0
     assert len(effect.frames) == 2
     assert len(effect.frames[0]) == 68
     assert effect.frames[0][0] == (1, 2, 3)
@@ -167,3 +168,24 @@ def test_overlay_export_preserves_opaque_black_and_avoids_real_magenta_collision
     assert frame[1] == (255, 0, 255)
     assert frame[2] == (254, 0, 255)
     assert frame[3] == (255, 0, 255)
+
+
+def test_export_round_trips_intro_frames_and_rejects_intro_past_loop_end(tmp_path):
+    shape = Shape("rectangle", "all", width=1.0, height=1.0, color=(1, 2, 3))
+    project = Project(
+        "intro test", duration_ms=250, fps=20, frame_ms=50, effect_id=8,
+        loops=4, loop_frames=4, intro_frames=1,
+        layers=[Layer("one", shapes=[shape])],
+    )
+
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "intro.h")
+    text = path.read_text(encoding="utf-8")
+    effect = parse_effect_data(text)[0]
+
+    assert '{ 8, "intro test", fx_intro_test, 5, 50, 4, 4, 0, 1 }' in text
+    assert effect.intro_frames == 1
+    assert effect.normalized_intro_frames == 1
+
+    project.intro_frames = 5  # past the loop end (4) - must be rejected
+    with pytest.raises(ValueError, match="introFrames"):
+        export_arduino_header(project, [(0.5, 0.5)], tmp_path / "bad.h")

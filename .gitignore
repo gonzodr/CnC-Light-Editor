@@ -9,5 +9,6 @@ exports/*.h
 projects/*.cnclight
 projects/.autosave/
 projects/.editor_settings.json
+projects/crash.log
 /work/
 !projects/.gitkeep

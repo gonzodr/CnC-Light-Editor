@@ -46,12 +46,17 @@ class ImportedEffect:
     loop_frames: int = 0
     overlay: bool = False
     project_data: dict | None = None
+    intro_frames: int = 0
 
     @property
     def normalized_loop_frames(self) -> int:
         if not self.frames:
             return 0
         return len(self.frames) if self.loop_frames == 0 else min(len(self.frames), self.loop_frames)
+
+    @property
+    def normalized_intro_frames(self) -> int:
+        return max(0, min(self.intro_frames, self.normalized_loop_frames))
 
     @property
     def stored_duration_ms(self) -> int:
@@ -61,8 +66,10 @@ class ImportedEffect:
     def duration_ms(self) -> int:
         if not self.frames:
             return self.frame_ms
-        loop_frames = self.normalized_loop_frames
-        steps = loop_frames * max(1, self.loops) + len(self.frames) - loop_frames
+        intro_frames = self.normalized_intro_frames
+        loop_end = self.normalized_loop_frames
+        loop_len = loop_end - intro_frames
+        steps = intro_frames + loop_len * max(1, self.loops) + len(self.frames) - loop_end
         return max(self.frame_ms, steps * self.frame_ms)
 
     @property
@@ -76,11 +83,21 @@ class ImportedEffect:
     def colors_at(self, time_ms: int) -> list[Color]:
         if not self.frames:
             return [BLACK] * EFFECT_LEDS
-        loop_frames = self.normalized_loop_frames
-        cycle_steps = loop_frames * max(1, self.loops)
-        total_steps = cycle_steps + len(self.frames) - loop_frames
+        intro_frames = self.normalized_intro_frames
+        loop_end = self.normalized_loop_frames
+        loop_len = loop_end - intro_frames
+        cycle_steps = loop_len * max(1, self.loops)
+        total_steps = intro_frames + cycle_steps + len(self.frames) - loop_end
         step = max(0, min(total_steps - 1, time_ms // self.frame_ms))
-        frame_index = step % loop_frames if step < cycle_steps else loop_frames + step - cycle_steps
+        if step < intro_frames:
+            frame_index = step
+        else:
+            after_intro = step - intro_frames
+            frame_index = (
+                intro_frames + (after_intro % loop_len if loop_len else 0)
+                if after_intro < cycle_steps
+                else loop_end + after_intro - cycle_steps
+            )
         return self.frames[frame_index]
 
 
@@ -124,14 +141,14 @@ def _parse_v4_effects(
     row_pattern = re.compile(
         r"\{\s*(\d+)\s*,\s*\"((?:\\.|[^\"\\])*)\"\s*,\s*"
         r"(fx_[A-Za-z_]\w*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
-        r"\s*(?:,\s*(\d+))?\s*\}"
+        r"\s*(?:,\s*(\d+))?\s*(?:,\s*(\d+))?\s*\}"
     )
     effects: list[ImportedEffect] = []
     seen_ids: set[int] = set()
     for match in row_pattern.finditer(table_match.group(1)):
         (
             raw_id, raw_name, symbol, raw_frames, raw_frame_ms, raw_loops,
-            raw_loop_frames, raw_overlay,
+            raw_loop_frames, raw_overlay, raw_intro_frames,
         ) = match.groups()
         effect_id = int(raw_id)
         frame_count = int(raw_frames)
@@ -139,6 +156,7 @@ def _parse_v4_effects(
         loops = int(raw_loops) or 1
         loop_frames = int(raw_loop_frames)
         overlay = int(raw_overlay or 0)
+        intro_frames = int(raw_intro_frames or 0)
         name = json.loads(f'"{raw_name}"')
 
         if effect_id in seen_ids:
@@ -156,6 +174,9 @@ def _parse_v4_effects(
             raise ValueError(f"{name}: loopFrames must be between 0 and frames ({frame_count})")
         if overlay not in (0, 1):
             raise ValueError(f"{name}: overlay must be 0 (FULL) or 1 (CANVAS)")
+        normalized_loop_end = frame_count if loop_frames == 0 else loop_frames
+        if not 0 <= intro_frames <= normalized_loop_end:
+            raise ValueError(f"{name}: introFrames must be between 0 and the loop end ({normalized_loop_end})")
         if symbol not in arrays:
             raise ValueError(f"{name}: referenced data array {symbol} was not found")
 
@@ -169,7 +190,7 @@ def _parse_v4_effects(
             frames.append([tuple(chunk[index:index + 3]) for index in range(0, BYTES_PER_FRAME, 3)])
         effects.append(ImportedEffect(
             name, frames, frame_ms, effect_id, symbol, loops, loop_frames, bool(overlay),
-            embedded_projects.get(effect_id),
+            embedded_projects.get(effect_id), intro_frames,
         ))
 
     if not effects:

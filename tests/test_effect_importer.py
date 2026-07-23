@@ -130,3 +130,40 @@ def test_v4_import_rejects_invalid_overlay_flag():
 
     with pytest.raises(ValueError, match="overlay must be 0"):
         parse_effect_data(source)
+
+
+def test_parses_v4_intro_loop_outro_playback():
+    intro = [50, 50, 50] * EFFECT_LEDS
+    loop_a = [255, 0, 0] * EFFECT_LEDS
+    loop_b = [0, 0, 255] * EFFECT_LEDS
+    outro = [255, 255, 255] * EFFECT_LEDS
+    data = ",".join(map(str, intro + loop_a + loop_b + outro))
+    source = v4_header(
+        '{ 9, "intro-loop-outro", fx_ilo, 4, 50, 2, 3, 0, 1 },',
+        f"const uint8_t fx_ilo[] PROGMEM = {{ {data} }};",
+    )
+
+    effect = parse_effect_data(source)[0]
+
+    assert effect.intro_frames == 1
+    assert effect.normalized_intro_frames == 1
+    # intro plays once at t=0
+    assert effect.colors_at(0)[0] == (50, 50, 50)
+    # loop region [1,3) repeats twice: 50,100 -> loop_a; 100,150 -> loop_b (wraps)
+    assert effect.colors_at(50)[0] == (255, 0, 0)
+    assert effect.colors_at(100)[0] == (0, 0, 255)
+    assert effect.colors_at(150)[0] == (255, 0, 0)
+    assert effect.colors_at(200)[0] == (0, 0, 255)
+    # outro plays once after the loop finishes
+    assert effect.colors_at(250)[0] == (255, 255, 255)
+
+
+def test_v4_import_rejects_intro_frames_past_loop_end():
+    values = ",".join("0" for _ in range(EFFECT_LEDS * 3))
+    source = v4_header(
+        '{ 5, "bad-intro", fx_bad_intro, 1, 50, 1, 1, 0, 2 },',
+        f"const uint8_t fx_bad_intro[] PROGMEM = {{ {values} }};",
+    )
+
+    with pytest.raises(ValueError, match="introFrames"):
+        parse_effect_data(source)
