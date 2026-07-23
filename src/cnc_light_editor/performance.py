@@ -25,7 +25,9 @@ def recommended_preview_fps(
             pass
     detected = raspberry_pi_model() if model is None else model
     if "Raspberry Pi 3" in detected:
-        return 30
+        # Leave enough idle time for SDL/KMSDRM on the single fast core used by
+        # the editor.  This affects UI preview only, never the exported effect FPS.
+        return 20
     if detected.startswith("Raspberry Pi"):
         return 40
     return 60

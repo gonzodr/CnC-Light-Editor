@@ -79,7 +79,7 @@ CNC_LIGHT_EDITOR_AUTO_UPDATE=0 cnc-light-editor
 
 ### Raspberry Pi 3 teljesítmény
 
-A Pygame 2D Surface-skálázása, alfa-keverése, shape- és glow-rajzolása jellemzően CPU- és memóriasávszélesség-terhelés; a GPU közvetlenül nem rendereli ezeket a műveleteket. Az editor ezért cache-eli a méretezett playfield/guide felületeket, újrahasznosítja a stencil glow vásznat és a kvantált glow sprite-okat. Raspberry Pi 3-on a UI/preview automatikusan 30 FPS-re áll, ami nem módosítja az Arduino-export `frameMs`/FPS értékét. A felső FPS-kijelző a mért és a beállított értéket mutatja.
+A Pygame 2D Surface-skálázása, alfa-keverése, shape- és glow-rajzolása jellemzően CPU- és memóriasávszélesség-terhelés; a GPU közvetlenül nem rendereli ezeket a műveleteket. Az editor ezért csak a viewportban ténylegesen látható playfield/guide területet skálázza, korlátozza a render-cache méretét, újrahasznosítja a stencil glow vásznat és a kvantált glow sprite-okat. Raspberry Pi 3-on a UI/preview automatikusan 20 FPS-re áll, ami nem módosítja az Arduino-export `frameMs`/FPS értékét. A felső FPS-kijelző a mért és a beállított értéket mutatja.
 
 Kézi preview limit:
 

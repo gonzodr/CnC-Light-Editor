@@ -17,7 +17,7 @@ def make_editor() -> Editor:
 
 
 def test_preview_fps_adapts_to_pi_model_without_changing_project_fps():
-    assert recommended_preview_fps(model="Raspberry Pi 3 Model B Plus Rev 1.3") == 30
+    assert recommended_preview_fps(model="Raspberry Pi 3 Model B Plus Rev 1.3") == 20
     assert recommended_preview_fps(model="Raspberry Pi 4 Model B Rev 1.5") == 40
     assert recommended_preview_fps(model="Desktop PC") == 60
     assert recommended_preview_fps(override="24", model="Desktop PC") == 24
@@ -41,6 +41,40 @@ def test_scaled_playfield_is_cached_between_frames(monkeypatch):
     editor.draw()
 
     assert calls == 1
+
+
+def test_max_zoom_allocations_are_limited_to_visible_workspace():
+    editor = make_editor()
+    editor.stencil = True
+    editor.zoom = 5.0
+    editor._scaled_view_cache.clear()
+    editor._glow_canvas_cache.clear()
+
+    canvas, panel, timeline = editor.layout()
+    viewport = pygame.Rect(68, 54, panel.x - 68, timeline.y - 54)
+    assert canvas.height > viewport.height
+
+    editor.draw()
+
+    cached_surfaces = [
+        *editor._scaled_view_cache.values(),
+        *editor._glow_canvas_cache.values(),
+    ]
+    assert cached_surfaces
+    assert all(surface.get_width() <= viewport.width for surface in cached_surfaces)
+    assert all(surface.get_height() <= viewport.height for surface in cached_surfaces)
+
+
+def test_zoom_cache_does_not_accumulate_full_resolution_surfaces():
+    editor = make_editor()
+    editor.stencil = True
+
+    for zoom in (5.0, 4.0, 3.0, 2.0, 1.0, 0.5, 0.35):
+        editor.zoom = zoom
+        editor.draw()
+
+    assert len(editor._scaled_view_cache) <= 2
+    assert len(editor._glow_canvas_cache) <= 2
 
 
 def test_glow_sprites_reuse_quantized_color_surfaces():
