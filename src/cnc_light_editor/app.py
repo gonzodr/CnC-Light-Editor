@@ -4224,7 +4224,15 @@ class Editor:
             # avoids a temporary memory spike while the wheel is still moving.
             if len(self._scaled_view_cache) >= 2:
                 self._scaled_view_cache.clear()
-            crop = source.subsurface(source_rect)
+            # pygame-ce/SDL can SIGBUS on 32-bit ARM when smoothscale reads a
+            # subsurface whose pixel pointer is offset inside its parent's buffer.
+            # A full-source crop is already contiguous; partial crops need their
+            # own aligned storage before entering the native scaler.
+            crop = (
+                source
+                if source_rect == source.get_rect()
+                else source.subsurface(source_rect).copy()
+            )
             cached = pygame.transform.smoothscale(crop, visible.size).convert_alpha()
             self._scaled_view_cache[key] = cached
         self.screen.blit(cached, visible)
