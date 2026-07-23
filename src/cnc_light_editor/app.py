@@ -6,6 +6,9 @@ from dataclasses import dataclass, replace
 import math
 import os
 from pathlib import Path
+from queue import Empty, SimpleQueue
+import sys
+import threading
 from uuid import uuid4
 
 import pygame
@@ -21,6 +24,7 @@ from .exporter import (
 )
 from .ledmap import Led, LedMap
 from .model import GradientStop, Keyframe, Layer, Project, RandomLedEffect, Shape
+from .performance import recommended_preview_fps
 from .property_widgets import (
     LAYER_PROPERTY_SPECS,
     NumericPropertySpec,
@@ -28,6 +32,8 @@ from .property_widgets import (
     SHAPE_PROPERTY_SPECS,
 )
 from .ui_settings import UiSettingsStore
+from .updater import GitUpdater, UpdateEvent
+from .version import APP_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "projects" / "current.cnclight"
@@ -86,6 +92,7 @@ HELP_COLUMNS = (
             ("Mouse wheel", "Zoom playfield"),
             ("Middle-drag", "Pan playfield"),
             ("Space + drag", "Pan playfield"),
+            ("Top FPS meter", "Measured / configured preview FPS"),
         )),
         ("LED MAP", (
             ("Tab / Right", "Next LED position"),
@@ -154,10 +161,12 @@ class Editor:
         autosave_directory: str | Path = AUTOSAVE_DIR,
         settings_path: str | Path = UI_SETTINGS_FILE,
         check_recovery: bool = True,
+        target_fps: int | None = None,
     ):
         self.screen = screen
         self.window_flags = pygame.FULLSCREEN if pygame.display.is_fullscreen() else pygame.RESIZABLE
         self.clock = pygame.time.Clock()
+        self.target_fps = recommended_preview_fps(override=target_fps)
         self.font = pygame.font.Font(None, 22)
         self.small = pygame.font.Font(None, 18)
         self.title = pygame.font.Font(None, 30)
@@ -239,6 +248,15 @@ class Editor:
         self.confirmation_message = ""
         self.confirmation_action = ""
         self.confirmation_payload: object | None = None
+        self.exit_requested = False
+        self.restart_requested = False
+        self.update_state = "idle"
+        self.update_status = f"v{APP_VERSION} · {self.target_fps} FPS"
+        self.update_events: SimpleQueue[UpdateEvent] = SimpleQueue()
+        self.update_thread: threading.Thread | None = None
+        self._scaled_view_cache: dict[tuple[str, tuple[int, int]], pygame.Surface] = {}
+        self._glow_sprite_cache: dict[tuple[int, tuple[int, int, int]], pygame.Surface] = {}
+        self._glow_canvas_cache: dict[tuple[int, int], pygame.Surface] = {}
         self.active_layer = 0
         self.selected: Shape | None = None
         self.drag_mode: str | None = None
@@ -308,16 +326,24 @@ class Editor:
         self.project.layers[0].shapes.append(shape)
         self.selected = shape
 
-    def run(self, smoke_test: bool = False, screenshot: Path | None = None) -> None:
-        running = True
+    def run(
+        self,
+        smoke_test: bool = False,
+        screenshot: Path | None = None,
+        *,
+        auto_update: bool = True,
+    ) -> bool:
+        if auto_update and not smoke_test:
+            self.start_update_check(auto_install=True)
         frames = 0
-        while running:
-            dt = self.clock.tick(60)
+        while not self.exit_requested and not self.restart_requested:
+            dt = self.clock.tick(self.target_fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    self._request_exit()
                 else:
                     self.handle_event(event)
+            self._poll_update_events()
             if self.playing:
                 self.current_ms = (self.current_ms + dt) % max(1, self._playback_duration())
             self._maybe_autosave()
@@ -327,7 +353,55 @@ class Editor:
             if smoke_test and frames >= 3:
                 if screenshot:
                     pygame.image.save(self.screen, str(screenshot))
-                running = False
+                self.exit_requested = True
+        return self.restart_requested
+
+    def start_update_check(self, *, auto_install: bool = True) -> bool:
+        if self.update_thread and self.update_thread.is_alive():
+            return False
+        self.update_state = "checking"
+        self.update_status = "Checking for updates…"
+
+        def worker() -> None:
+            updater = GitUpdater(ROOT, python_executable=sys.executable)
+            updater.run(auto_install=auto_install, emit=self.update_events.put)
+
+        self.update_thread = threading.Thread(
+            target=worker,
+            name="cnc-light-editor-updater",
+            daemon=True,
+        )
+        self.update_thread.start()
+        return True
+
+    def _poll_update_events(self) -> None:
+        while True:
+            try:
+                event = self.update_events.get_nowait()
+            except Empty:
+                break
+            self.update_state = event.state
+            self.update_status = event.message
+            if event.state in {"downloading", "installing", "failed"}:
+                self.status = event.message
+            elif event.state == "restart":
+                if self._project_is_dirty():
+                    self._maybe_autosave(force=True)
+                self.restart_requested = True
+
+    def _request_exit(self) -> None:
+        if self.update_state in {"downloading", "installing"}:
+            self.status = "Please wait for the update to finish before exiting"
+            return
+        self.playing = False
+        if self._project_is_dirty():
+            self._request_confirmation(
+                "Exit editor",
+                "The project has unsaved changes. A recovery snapshot will be saved before exit.",
+                "exit_application",
+            )
+            return
+        self.exit_requested = True
 
     def layout(self) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect]:
         width, height = self.screen.get_size()
@@ -1239,6 +1313,8 @@ class Editor:
             self._save_current_project()
         elif action == "new":
             self._new_project()
+        elif action == "exit":
+            self._request_exit()
         elif action == "save_as":
             self._choose_project_save()
         elif action == "load":
@@ -3330,6 +3406,9 @@ class Editor:
             return
         if action == "new_project":
             self._new_project(confirm=False)
+        elif action == "exit_application":
+            self._maybe_autosave(force=True)
+            self.exit_requested = True
         elif action == "load_project" and isinstance(payload, Path):
             try:
                 self.load_project_file(payload)
@@ -4054,11 +4133,9 @@ class Editor:
         self.screen.set_clip(viewport)
         if self.stencil:
             self._draw_leds(canvas, stencil_back=True)
-            artwork = pygame.transform.smoothscale(self.playfield, canvas.size)
-            self.screen.blit(artwork, canvas)
+            self.screen.blit(self._scaled_view_surface("artwork", canvas.size), canvas)
         else:
-            guide = pygame.transform.smoothscale(self.layout_guide, canvas.size)
-            self.screen.blit(guide, canvas)
+            self.screen.blit(self._scaled_view_surface("guide", canvas.size), canvas)
             self._draw_shapes(canvas)
             self._draw_selection(canvas)
             self._draw_leds(canvas)
@@ -4084,6 +4161,20 @@ class Editor:
         if self.confirmation_open:
             self._draw_confirmation_dialog()
 
+    def _scaled_view_surface(
+        self, mode: str, size: tuple[int, int],
+    ) -> pygame.Surface:
+        key = (mode, size)
+        cached = self._scaled_view_cache.get(key)
+        if cached is not None:
+            return cached
+        source = self.playfield if mode == "artwork" else self.layout_guide
+        scaled = pygame.transform.smoothscale(source, size).convert_alpha()
+        if len(self._scaled_view_cache) >= 6:
+            self._scaled_view_cache.clear()
+        self._scaled_view_cache[key] = scaled
+        return scaled
+
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
         dirty = " *" if self._project_is_dirty() else ""
@@ -4096,7 +4187,10 @@ class Editor:
         width = self.screen.get_width()
         pygame.draw.rect(self.screen, (38, 41, 50), (0, 0, width, TOP_BAR))
         pygame.draw.line(self.screen, (62, 66, 78), (0, TOP_BAR - 1), (width, TOP_BAR - 1))
-        self.screen.blit(self.small.render("CnC  LIGHT COMPOSER", True, (235, 238, 245)), (16, 8))
+        self.screen.blit(
+            self.small.render(f"CnC  LIGHT COMPOSER  v{APP_VERSION}", True, (235, 238, 245)),
+            (16, 8),
+        )
         project_label = self.project_path.name if self.project_path else "Untitled project"
         project_label = project_label if len(project_label) <= 25 else project_label[:22] + "..."
         if self._project_is_dirty():
@@ -4111,21 +4205,55 @@ class Editor:
             ("load", "Load"),
             ("export", "Export"),
         ]
-        x = 238
+        compact = width < 1180
+        compact_labels = {
+            "play": "Stop" if self.playing else "Play",
+            "keyframe": "+K",
+            "stencil": "STN",
+            "calibration": "LED",
+            "save": "Save*" if self._project_is_dirty() else "Save",
+            "load": "Load",
+            "export": "Export",
+        }
+        x = 196 if compact else 238
         for action, label in items:
-            button_width = max(58, self.small.size(label)[0] + 20)
+            if compact:
+                label = compact_labels[action]
+            button_width = max(42 if compact else 58, self.small.size(label)[0] + (12 if compact else 20))
             rect = pygame.Rect(x, 11, button_width, 32)
             active = (action == "stencil" and self.stencil) or (action == "calibration" and self.calibration)
             self._button(rect, action, label, active)
-            x += button_width + 7
+            x += button_width + (4 if compact else 7)
 
-        self._button(pygame.Rect(width - 118, 11, 58, 32), "new", "New", False)
-        self._button(pygame.Rect(width - 52, 11, 36, 32), "help", "?", False)
+        measured_fps = self.clock.get_fps()
+        performance_label = (
+            f"{measured_fps:.0f}/{self.target_fps} FPS"
+            if measured_fps > 0.5 else f"--/{self.target_fps} FPS"
+        )
+        show_update_status = self.update_state in {
+            "checking", "downloading", "installing", "failed", "restart", "available",
+        }
+        display_status = self.update_status if show_update_status else performance_label
+        update_color = (
+            (255, 184, 82) if self.update_state in {"checking", "downloading", "installing", "available"}
+            else (255, 111, 99) if self.update_state == "failed"
+            else (255, 184, 82) if measured_fps > 0.5 and measured_fps < self.target_fps * 0.8
+            else (120, 204, 169)
+        )
+        update_area = pygame.Rect(width - INSPECTOR_WIDTH + 8, 11, 136, 32)
+        update_label = self._fit_text(display_status, self.small, update_area.width)
+        update_surface = self.small.render(update_label, True, update_color)
+        self.screen.blit(update_surface, update_surface.get_rect(center=update_area.center))
+
+        self._button(pygame.Rect(width - 168, 11, 58, 32), "new", "New", False)
+        self._button(pygame.Rect(width - 102, 11, 36, 32), "help", "?", False)
+        self._button(pygame.Rect(width - 58, 11, 48, 32), "exit", "Exit", False)
 
         duration_field = self._duration_input_rect()
         imported = self._active_imported_effect()
-        label = self.small.render("Length", True, (154, 162, 180))
-        self.screen.blit(label, (duration_field.x - label.get_width() - 7, 20))
+        if not compact:
+            label = self.small.render("Length", True, (154, 162, 180))
+            self.screen.blit(label, (duration_field.x - label.get_width() - 7, 20))
         pygame.draw.rect(self.screen, (35, 39, 48), duration_field, border_radius=4)
         pygame.draw.rect(
             self.screen, ACCENT if self.duration_editing else (76, 82, 98),
@@ -4490,24 +4618,20 @@ class Editor:
         colors = self._preview_led_colors()
         radius = max(3, min(9, canvas.width // 90))
         if stencil_back:
-            glow_layer = pygame.Surface(canvas.size, pygame.SRCALPHA)
+            glow_layer = self._glow_canvas_cache.get(canvas.size)
+            if glow_layer is None:
+                glow_layer = pygame.Surface(canvas.size).convert()
+                if len(self._glow_canvas_cache) >= 3:
+                    self._glow_canvas_cache.clear()
+                self._glow_canvas_cache[canvas.size] = glow_layer
+            glow_layer.fill((0, 0, 0))
             light_radius = max(20, min(46, canvas.width // 10))
             for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
                 color = (0, 0, 0) if led.name.strip().upper() == "NULL" else rendered_color
                 if not any(color):
                     continue
-                diameter = light_radius * 2 + 2
-                light = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-                center = (diameter // 2, diameter // 2)
-                rings = (
-                    (light_radius, 0.10),
-                    (round(light_radius * 0.78), 0.18),
-                    (round(light_radius * 0.56), 0.34),
-                    (round(light_radius * 0.34), 0.68),
-                    (max(3, round(light_radius * 0.16)), 1.0),
-                )
-                for ring_radius, strength in rings:
-                    pygame.draw.circle(light, tuple(round(channel * strength) for channel in color), center, ring_radius)
+                light = self._glow_sprite(light_radius, color)
+                center = (light.get_width() // 2, light.get_height() // 2)
                 local = (round(x * canvas.width - center[0]), round(y * canvas.height - center[1]))
                 glow_layer.blit(light, local, special_flags=pygame.BLEND_RGB_ADD)
             self.screen.blit(glow_layer, canvas.topleft, special_flags=pygame.BLEND_RGB_ADD)
@@ -4525,6 +4649,37 @@ class Editor:
             if canvas.width > 620 or self.calibration:
                 label = str(led.firmware_index)
                 self.screen.blit(self.small.render(label, True, (245, 245, 245)), (pos[0] + radius, pos[1] - radius))
+
+    def _glow_sprite(
+        self, radius: int, color: tuple[int, int, int],
+    ) -> pygame.Surface:
+        quantized = tuple(min(255, round(channel / 8) * 8) for channel in color)
+        key = (radius, quantized)
+        cached = self._glow_sprite_cache.get(key)
+        if cached is not None:
+            return cached
+        diameter = radius * 2 + 2
+        light = pygame.Surface((diameter, diameter)).convert()
+        light.fill((0, 0, 0))
+        center = (diameter // 2, diameter // 2)
+        rings = (
+            (radius, 0.10),
+            (round(radius * 0.78), 0.18),
+            (round(radius * 0.56), 0.34),
+            (round(radius * 0.34), 0.68),
+            (max(3, round(radius * 0.16)), 1.0),
+        )
+        for ring_radius, strength in rings:
+            pygame.draw.circle(
+                light,
+                tuple(round(channel * strength) for channel in quantized),
+                center,
+                ring_radius,
+            )
+        if len(self._glow_sprite_cache) >= 256:
+            self._glow_sprite_cache.clear()
+        self._glow_sprite_cache[key] = light
+        return light
 
     def _draw_timeline(self, rect: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, (29, 32, 40), rect)
@@ -5920,6 +6075,15 @@ def main() -> None:
         help="Initial window size as WIDTHxHEIGHT (default: 1280x1024)",
     )
     parser.add_argument("--fullscreen", action="store_true", help="Use a fullscreen Raspberry Pi display")
+    parser.add_argument(
+        "--fps", type=int,
+        help="Preview/UI frame cap (Pi 3 defaults to 30; export FPS is unchanged)",
+    )
+    parser.add_argument(
+        "--no-auto-update", action="store_true",
+        default=os.environ.get("CNC_LIGHT_EDITOR_AUTO_UPDATE", "1").strip().lower() in {"0", "false", "no"},
+        help="Do not check, install, and restart after GitHub updates",
+    )
     args = parser.parse_args()
     if args.smoke_test:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -5929,13 +6093,27 @@ def main() -> None:
     flags = pygame.FULLSCREEN if args.fullscreen else pygame.RESIZABLE
     screen = pygame.display.set_mode(args.resolution, flags)
     pygame.display.set_caption("CnC Pinball — Light Effect Editor")
+    restart_requested = False
     try:
-        editor = Editor(screen, check_recovery=not args.smoke_test)
+        editor = Editor(
+            screen,
+            check_recovery=not args.smoke_test,
+            target_fps=args.fps,
+        )
         if args.effect_data:
             editor.load_effect_data_file(args.effect_data)
-        editor.run(args.smoke_test, args.screenshot)
+        restart_requested = editor.run(
+            args.smoke_test,
+            args.screenshot,
+            auto_update=not args.no_auto_update,
+        )
     finally:
         pygame.quit()
+    if restart_requested:
+        os.execv(
+            sys.executable,
+            [sys.executable, "-m", "cnc_light_editor.app", *sys.argv[1:]],
+        )
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from cnc_light_editor.exporter import (
     sample_project_frames,
 )
 from cnc_light_editor.model import Layer, Project, Shape
+from cnc_light_editor.updater import UpdateEvent
 
 
 def make_editor() -> Editor:
@@ -42,6 +43,7 @@ def test_native_1280x1024_workspace_and_resolution_parser():
     editor.draw()
     actions = {action for _rect, action, _label in editor.buttons}
     assert "rename_layer:7" in actions
+    assert "exit" in actions
 
 
 def test_timeline_resize_drag_clamps_resets_and_persists(tmp_path):
@@ -1367,6 +1369,40 @@ def test_dirty_new_project_uses_in_app_confirmation():
     editor._resolve_confirmation(True)
     assert editor.confirmation_open is False
     assert editor.project.name == "Untitled effect"
+
+
+def test_exit_button_preserves_dirty_project_in_recovery_before_closing(monkeypatch):
+    editor = make_editor()
+    autosaved = []
+    monkeypatch.setattr(
+        editor, "_maybe_autosave",
+        lambda **kwargs: autosaved.append(kwargs) or True,
+    )
+
+    editor._action("exit")
+    assert editor.confirmation_open is True
+    assert editor.confirmation_action == "exit_application"
+    assert editor.exit_requested is False
+
+    editor._resolve_confirmation(True)
+    assert autosaved == [{"force": True}]
+    assert editor.exit_requested is True
+
+
+def test_update_restart_event_autosaves_dirty_project(monkeypatch):
+    editor = make_editor()
+    autosaved = []
+    monkeypatch.setattr(
+        editor, "_maybe_autosave",
+        lambda **kwargs: autosaved.append(kwargs) or True,
+    )
+    editor.update_events.put(UpdateEvent("restart", "Update installed — restarting…"))
+
+    editor._poll_update_events()
+
+    assert autosaved == [{"force": True}]
+    assert editor.restart_requested is True
+    assert editor.update_state == "restart"
 
 
 def test_stroke_width_accepts_manual_values_up_to_five_percent():
