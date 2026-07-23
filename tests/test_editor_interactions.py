@@ -503,6 +503,22 @@ def test_timeline_zoom_and_duration_are_independent():
     assert 1900 <= editor.project.duration_ms <= 2100
 
 
+def test_canvas_zoom_recovers_an_offscreen_playfield_and_keeps_it_reachable():
+    editor = make_editor()
+    editor.zoom = 0.4
+    editor.pan.update(10000, 10000)
+    _canvas, panel, timeline = editor.layout()
+    viewport = pygame.Rect(68, 54, panel.x - 68, timeline.y - 54)
+
+    editor.handle_event(pygame.event.Event(
+        pygame.MOUSEWHEEL,
+        {"y": -1, "x": 0, "pos": viewport.center},
+    ))
+
+    canvas, _, _ = editor.layout()
+    assert viewport.contains(canvas)
+
+
 def test_keyframe_context_menu_can_render():
     editor = make_editor()
     editor._create_shape("ellipse", (0.5, 0.5))

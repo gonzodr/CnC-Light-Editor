@@ -254,7 +254,9 @@ class Editor:
         self.update_status = f"v{APP_VERSION} · {self.target_fps} FPS"
         self.update_events: SimpleQueue[UpdateEvent] = SimpleQueue()
         self.update_thread: threading.Thread | None = None
-        self._scaled_view_cache: dict[tuple[str, tuple[int, int]], pygame.Surface] = {}
+        self._scaled_view_cache: dict[
+            tuple[str, tuple[int, int], tuple[int, int, int, int]], pygame.Surface
+        ] = {}
         self._glow_sprite_cache: dict[tuple[int, tuple[int, int, int]], pygame.Surface] = {}
         self._glow_canvas_cache: dict[tuple[int, int], pygame.Surface] = {}
         self.active_layer = 0
@@ -425,6 +427,30 @@ class Editor:
         canvas = pygame.Rect(0, 0, draw_w, draw_h)
         canvas.center = viewport.center + self.pan
         return canvas, panel, timeline
+
+    def _clamp_canvas_pan(self, viewport: pygame.Rect) -> None:
+        """Keep the playfield reachable after zooming or panning.
+
+        A small canvas stays completely inside the workspace.  A zoomed-in canvas
+        may move beyond it, but at least a grab-sized strip always remains visible.
+        """
+        canvas, _, _ = self.layout()
+        grab = min(48, canvas.width, canvas.height)
+
+        if canvas.width <= viewport.width:
+            min_left, max_left = viewport.left, viewport.right - canvas.width
+        else:
+            min_left = viewport.left + grab - canvas.width
+            max_left = viewport.right - grab
+        if canvas.height <= viewport.height:
+            min_top, max_top = viewport.top, viewport.bottom - canvas.height
+        else:
+            min_top = viewport.top + grab - canvas.height
+            max_top = viewport.bottom - grab
+
+        wanted_left = max(min_left, min(max_left, canvas.left))
+        wanted_top = max(min_top, min(max_top, canvas.top))
+        self.pan += pygame.Vector2(wanted_left - canvas.left, wanted_top - canvas.top)
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.VIDEORESIZE:
@@ -802,6 +828,7 @@ class Editor:
         if event.type == pygame.MOUSEMOTION:
             if self.drag_mode == "pan":
                 self.pan += pygame.Vector2(event.rel)
+                self._clamp_canvas_pan(viewport)
             elif self.drag_mode == "playhead":
                 self._set_playhead(event.pos[0], timeline)
             elif self.drag_mode == "keyframe" and self.drag_key_time is not None:
@@ -854,11 +881,13 @@ class Editor:
                 else:
                     self._zoom_timeline(event.y, mouse[0], timeline)
             elif viewport.collidepoint(mouse):
-                old_point = self._screen_to_world(mouse, canvas)
+                anchor = mouse if canvas.collidepoint(mouse) else canvas.center
+                old_point = self._screen_to_world(anchor, canvas)
                 self.zoom = max(0.35, min(5.0, self.zoom * (1.12 ** event.y)))
                 new_canvas, _, _ = self.layout()
                 new_screen = self._world_to_screen(old_point, new_canvas)
-                self.pan += pygame.Vector2(mouse) - pygame.Vector2(new_screen)
+                self.pan += pygame.Vector2(anchor) - pygame.Vector2(new_screen)
+                self._clamp_canvas_pan(viewport)
 
     def _clamp_timeline_height(self, value: object) -> int:
         try:
@@ -4133,9 +4162,9 @@ class Editor:
         self.screen.set_clip(viewport)
         if self.stencil:
             self._draw_leds(canvas, stencil_back=True)
-            self.screen.blit(self._scaled_view_surface("artwork", canvas.size), canvas)
+            self._draw_view_surface("artwork", canvas)
         else:
-            self.screen.blit(self._scaled_view_surface("guide", canvas.size), canvas)
+            self._draw_view_surface("guide", canvas)
             self._draw_shapes(canvas)
             self._draw_selection(canvas)
             self._draw_leds(canvas)
@@ -4161,19 +4190,44 @@ class Editor:
         if self.confirmation_open:
             self._draw_confirmation_dialog()
 
-    def _scaled_view_surface(
-        self, mode: str, size: tuple[int, int],
-    ) -> pygame.Surface:
-        key = (mode, size)
-        cached = self._scaled_view_cache.get(key)
-        if cached is not None:
-            return cached
+    def _draw_view_surface(self, mode: str, canvas: pygame.Rect) -> None:
+        """Draw only the visible playfield region instead of scaling its full canvas.
+
+        At 5x zoom the full portrait image can exceed 20 MiB.  Keeping several
+        converted copies was enough to exhaust a Pi 3 and could crash SDL/KMSDRM.
+        The visible crop is bounded by the workspace, so allocation no longer grows
+        with zoom.
+        """
+        visible = canvas.clip(self.screen.get_clip())
+        if visible.width <= 0 or visible.height <= 0:
+            return
+
         source = self.playfield if mode == "artwork" else self.layout_guide
-        scaled = pygame.transform.smoothscale(source, size).convert_alpha()
-        if len(self._scaled_view_cache) >= 6:
-            self._scaled_view_cache.clear()
-        self._scaled_view_cache[key] = scaled
-        return scaled
+        relative = visible.move(-canvas.x, -canvas.y)
+        source_left = math.floor(relative.left * source.get_width() / canvas.width)
+        source_top = math.floor(relative.top * source.get_height() / canvas.height)
+        source_right = math.ceil(relative.right * source.get_width() / canvas.width)
+        source_bottom = math.ceil(relative.bottom * source.get_height() / canvas.height)
+        source_rect = pygame.Rect(
+            source_left,
+            source_top,
+            max(1, source_right - source_left),
+            max(1, source_bottom - source_top),
+        ).clip(source.get_rect())
+        if source_rect.width <= 0 or source_rect.height <= 0:
+            return
+
+        key = (mode, visible.size, tuple(source_rect))
+        cached = self._scaled_view_cache.get(key)
+        if cached is None:
+            # Release old converted surfaces before allocating the next one.  This
+            # avoids a temporary memory spike while the wheel is still moving.
+            if len(self._scaled_view_cache) >= 2:
+                self._scaled_view_cache.clear()
+            crop = source.subsurface(source_rect)
+            cached = pygame.transform.smoothscale(crop, visible.size).convert_alpha()
+            self._scaled_view_cache[key] = cached
+        self.screen.blit(cached, visible)
 
     def _update_window_caption(self) -> None:
         project_label = self.project_path.name if self.project_path else self.project.name
@@ -4618,12 +4672,17 @@ class Editor:
         colors = self._preview_led_colors()
         radius = max(3, min(9, canvas.width // 90))
         if stencil_back:
-            glow_layer = self._glow_canvas_cache.get(canvas.size)
+            visible = canvas.clip(self.screen.get_clip())
+            if visible.width <= 0 or visible.height <= 0:
+                return
+            glow_layer = self._glow_canvas_cache.get(visible.size)
             if glow_layer is None:
-                glow_layer = pygame.Surface(canvas.size).convert()
-                if len(self._glow_canvas_cache) >= 3:
+                # The old code allocated a full-canvas glow surface.  At maximum
+                # zoom that was tens of MiB even though only the viewport is shown.
+                if len(self._glow_canvas_cache) >= 2:
                     self._glow_canvas_cache.clear()
-                self._glow_canvas_cache[canvas.size] = glow_layer
+                glow_layer = pygame.Surface(visible.size).convert()
+                self._glow_canvas_cache[visible.size] = glow_layer
             glow_layer.fill((0, 0, 0))
             light_radius = max(20, min(46, canvas.width // 10))
             for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
@@ -4632,9 +4691,12 @@ class Editor:
                     continue
                 light = self._glow_sprite(light_radius, color)
                 center = (light.get_width() // 2, light.get_height() // 2)
-                local = (round(x * canvas.width - center[0]), round(y * canvas.height - center[1]))
+                local = (
+                    round(canvas.x + x * canvas.width - visible.x - center[0]),
+                    round(canvas.y + y * canvas.height - visible.y - center[1]),
+                )
                 glow_layer.blit(light, local, special_flags=pygame.BLEND_RGB_ADD)
-            self.screen.blit(glow_layer, canvas.topleft, special_flags=pygame.BLEND_RGB_ADD)
+            self.screen.blit(glow_layer, visible.topleft, special_flags=pygame.BLEND_RGB_ADD)
             return
         for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
             color = (0, 0, 0) if led.name.strip().upper() == "NULL" else rendered_color
@@ -6077,7 +6139,7 @@ def main() -> None:
     parser.add_argument("--fullscreen", action="store_true", help="Use a fullscreen Raspberry Pi display")
     parser.add_argument(
         "--fps", type=int,
-        help="Preview/UI frame cap (Pi 3 defaults to 30; export FPS is unchanged)",
+        help="Preview/UI frame cap (Pi 3 defaults to 20; export FPS is unchanged)",
     )
     parser.add_argument(
         "--no-auto-update", action="store_true",
