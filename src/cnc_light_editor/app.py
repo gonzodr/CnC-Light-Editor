@@ -4215,7 +4215,7 @@ class Editor:
             "load": "Load",
             "export": "Export",
         }
-        x = 196 if compact else 238
+        x = 184 if compact else 238
         for action, label in items:
             if compact:
                 label = compact_labels[action]
