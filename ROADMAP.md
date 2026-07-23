@@ -43,8 +43,10 @@
 
 8. **Architektúra és Raspberry Pi teljesítmény**
    - A canvas, timeline, inspector, LED-map és firmware-import külön modulokra bontása.
-   - Skálázott artworkök és fényrétegek cache-elése.
+   - [x] Skálázott artworkök, guide és stencil glow erőforrások cache-elése.
    - [x] Desktop-független, Pygame-es fájlböngésző és megerősítő dialógus headless Pi futtatáshoz.
+   - [x] Biztonságos `origin/main` auto-update, csomagtelepítés, recovery és újraindítás.
+   - [x] Automatikus Pi 3 preview FPS-limit és élő FPS-kijelzés.
    - Windows- és Raspberry Pi-specifikus CI/smoke ellenőrzések.
 
 9. **Professional Effect Bank workflow**

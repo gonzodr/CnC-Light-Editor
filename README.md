@@ -65,6 +65,30 @@ SDL_VIDEODRIVER=kmsdrm SDL_AUDIODRIVER=dummy \
 
 A beépített fájlböngészőben a Home, Project, Projects, Exports és Root gyorshelyekről lehet indulni; az útvonal és mentési fájlnév kézzel vagy `Ctrl+V`-vel is megadható. Az overwrite és a nem mentett projekt megerősítése szintén az SDL/Pygame felületen történik.
 
+### Automatikus frissítés
+
+Git clone-ból, a tiszta `main` ágon futtatva az editor induláskor háttérben ellenőrzi az `origin/main` ágat. Új commit esetén kizárólag fast-forward frissítést hajt végre, újratelepíti a Python csomagot az aktív interpreterbe, recovery snapshotot készít a nem mentett projektről, majd ugyanabban az SDL/KMS környezetben újraindul. Fejlesztői branch, eltérő history vagy módosított követett fájl esetén nem ír felül semmit, hanem szünetelteti az automatikus frissítést. Sikertelen telepítéskor visszaáll az előző commitra.
+
+Az automatikus ellenőrzés szükség esetén kikapcsolható:
+
+```bash
+cnc-light-editor --no-auto-update
+# vagy
+CNC_LIGHT_EDITOR_AUTO_UPDATE=0 cnc-light-editor
+```
+
+### Raspberry Pi 3 teljesítmény
+
+A Pygame 2D Surface-skálázása, alfa-keverése, shape- és glow-rajzolása jellemzően CPU- és memóriasávszélesség-terhelés; a GPU közvetlenül nem rendereli ezeket a műveleteket. Az editor ezért cache-eli a méretezett playfield/guide felületeket, újrahasznosítja a stencil glow vásznat és a kvantált glow sprite-okat. Raspberry Pi 3-on a UI/preview automatikusan 30 FPS-re áll, ami nem módosítja az Arduino-export `frameMs`/FPS értékét. A felső FPS-kijelző a mért és a beállított értéket mutatja.
+
+Kézi preview limit:
+
+```bash
+cnc-light-editor --fps 24 --fullscreen
+# vagy
+CNC_LIGHT_EDITOR_FPS=24 cnc-light-editor --fullscreen
+```
+
 Más kijelzőméret a `--resolution WIDTHxHEIGHT` kapcsolóval vagy tartósan a `CNC_LIGHT_EDITOR_RESOLUTION` környezeti változóval állítható. Ablakos módban a felület átméretezhető; a viewport, timeline és Inspector automatikusan újratördelődik, 1280×1024-en pedig a magasabb Inspector több layer-sort jelenít meg.
 
 ## Kezelés
