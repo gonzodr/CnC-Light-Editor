@@ -6412,6 +6412,12 @@ def main() -> None:
     args = parser.parse_args()
     if args.smoke_test:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    # The editor never plays sound (no pygame.mixer usage anywhere), but
+    # pygame.init() unconditionally starts SDL's audio subsystem too. On a
+    # Pi with no usable ALSA output, that spins a hotplug/underrun-recovery
+    # thread that pins a full CPU core for as long as the app runs. Force
+    # the no-op audio backend so SDL never touches ALSA in the first place.
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.init()
     if WINDOW_ICON.is_file():
         pygame.display.set_icon(pygame.image.load(WINDOW_ICON))
