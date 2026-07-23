@@ -5,18 +5,20 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from cnc_light_editor.app import Editor
-from cnc_light_editor.performance import recommended_preview_fps
+from cnc_light_editor.performance import is_raspberry_pi, recommended_preview_fps
 
 
-def make_editor() -> Editor:
+def make_editor(**kwargs) -> Editor:
     pygame.init()
     screen = pygame.display.get_surface()
     if screen is None or screen.get_size() != (1280, 1024):
         screen = pygame.display.set_mode((1280, 1024))
-    return Editor(screen, check_recovery=False)
+    return Editor(screen, check_recovery=False, **kwargs)
 
 
 def test_preview_fps_adapts_to_pi_model_without_changing_project_fps():
+    assert is_raspberry_pi(model="Raspberry Pi 3 Model B Plus Rev 1.3") is True
+    assert is_raspberry_pi(model="Desktop PC") is False
     assert recommended_preview_fps(model="Raspberry Pi 3 Model B Plus Rev 1.3") == 20
     assert recommended_preview_fps(model="Raspberry Pi 4 Model B Rev 1.5") == 40
     assert recommended_preview_fps(model="Desktop PC") == 60
@@ -94,6 +96,29 @@ def test_smoothscale_never_receives_a_shared_buffer_subsurface(monkeypatch):
 
     assert parents
     assert all(parent is None for parent in parents)
+
+
+def test_raspberry_pi_safe_scaling_avoids_smoothscale_native_path(monkeypatch):
+    editor = make_editor(safe_scaling=True)
+    editor.stencil = True
+    editor.zoom = 5.0
+    editor._scaled_view_cache.clear()
+    scale_calls = 0
+    original_scale = pygame.transform.scale
+
+    def counted_scale(*args, **kwargs):
+        nonlocal scale_calls
+        scale_calls += 1
+        return original_scale(*args, **kwargs)
+
+    def forbidden_smoothscale(*_args, **_kwargs):
+        raise AssertionError("Pi-safe rendering must not call smoothscale")
+
+    monkeypatch.setattr(pygame.transform, "scale", counted_scale)
+    monkeypatch.setattr(pygame.transform, "smoothscale", forbidden_smoothscale)
+    editor.draw()
+
+    assert scale_calls >= 1
 
 
 def test_glow_sprites_reuse_quantized_color_surfaces():
