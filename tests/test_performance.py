@@ -77,6 +77,25 @@ def test_zoom_cache_does_not_accumulate_full_resolution_surfaces():
     assert len(editor._glow_canvas_cache) <= 2
 
 
+def test_smoothscale_never_receives_a_shared_buffer_subsurface(monkeypatch):
+    editor = make_editor()
+    editor.stencil = True
+    editor.zoom = 5.0
+    editor._scaled_view_cache.clear()
+    parents = []
+    original = pygame.transform.smoothscale
+
+    def inspect_source(source, *args, **kwargs):
+        parents.append(source.get_parent())
+        return original(source, *args, **kwargs)
+
+    monkeypatch.setattr(pygame.transform, "smoothscale", inspect_source)
+    editor.draw()
+
+    assert parents
+    assert all(parent is None for parent in parents)
+
+
 def test_glow_sprites_reuse_quantized_color_surfaces():
     editor = make_editor()
 
