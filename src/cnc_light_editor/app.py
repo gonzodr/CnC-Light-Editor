@@ -340,20 +340,31 @@ class Editor:
         if auto_update and not smoke_test:
             self.start_update_check(auto_install=True)
         frames = 0
+        redraw_requested = True
         while not self.exit_requested and not self.restart_requested:
             dt = self.clock.tick(self.target_fps)
-            for event in pygame.event.get():
+            events = pygame.event.get()
+            for event in events:
                 if event.type == pygame.QUIT:
                     self._request_exit()
                 else:
                     self.handle_event(event)
-            self._poll_update_events()
+            update_changed = self._poll_update_events()
             if self.playing:
                 self.current_ms = (self.current_ms + dt) % max(1, self._playback_duration())
-            self._maybe_autosave()
-            self.draw()
-            pygame.display.flip()
-            frames += 1
+            autosaved = self._maybe_autosave()
+            if (
+                redraw_requested
+                or bool(events)
+                or update_changed
+                or autosaved
+                or self.playing
+                or smoke_test
+            ):
+                self.draw()
+                pygame.display.flip()
+                frames += 1
+                redraw_requested = False
             if smoke_test and frames >= 3:
                 if screenshot:
                     pygame.image.save(self.screen, str(screenshot))
@@ -378,12 +389,14 @@ class Editor:
         self.update_thread.start()
         return True
 
-    def _poll_update_events(self) -> None:
+    def _poll_update_events(self) -> bool:
+        changed = False
         while True:
             try:
                 event = self.update_events.get_nowait()
             except Empty:
                 break
+            changed = True
             self.update_state = event.state
             self.update_status = event.message
             if event.state in {"downloading", "installing", "failed"}:
@@ -392,6 +405,7 @@ class Editor:
                 if self._project_is_dirty():
                     self._maybe_autosave(force=True)
                 self.restart_requested = True
+        return changed
 
     def _request_exit(self) -> None:
         if self.update_state in {"downloading", "installing"}:

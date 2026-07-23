@@ -121,6 +121,64 @@ def test_raspberry_pi_safe_scaling_avoids_smoothscale_native_path(monkeypatch):
     assert scale_calls >= 1
 
 
+def test_idle_run_draws_once_until_something_changes(monkeypatch):
+    editor = make_editor()
+    draw_calls = 0
+
+    class FiniteClock:
+        def __init__(self):
+            self.ticks = 0
+
+        def tick(self, _fps):
+            self.ticks += 1
+            if self.ticks >= 10:
+                editor.exit_requested = True
+            return 50
+
+    def counted_draw():
+        nonlocal draw_calls
+        draw_calls += 1
+
+    editor.clock = FiniteClock()
+    editor.draw = counted_draw
+    monkeypatch.setattr(pygame.event, "get", lambda: [])
+    monkeypatch.setattr(pygame.display, "flip", lambda: None)
+
+    editor.run(auto_update=False)
+
+    assert draw_calls == 1
+
+
+def test_playback_keeps_rendering_at_preview_ticks(monkeypatch):
+    editor = make_editor()
+    editor.playing = True
+    draw_calls = 0
+
+    class FiniteClock:
+        def __init__(self):
+            self.ticks = 0
+
+        def tick(self, _fps):
+            self.ticks += 1
+            if self.ticks >= 6:
+                editor.exit_requested = True
+            return 50
+
+    def counted_draw():
+        nonlocal draw_calls
+        draw_calls += 1
+
+    editor.clock = FiniteClock()
+    editor.draw = counted_draw
+    monkeypatch.setattr(pygame.event, "get", lambda: [])
+    monkeypatch.setattr(pygame.display, "flip", lambda: None)
+
+    editor.run(auto_update=False)
+
+    assert draw_calls == 6
+    assert editor.current_ms == 300
+
+
 def test_glow_sprites_reuse_quantized_color_surfaces():
     editor = make_editor()
 
