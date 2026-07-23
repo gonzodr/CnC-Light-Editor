@@ -50,11 +50,11 @@
    - Windows- és Raspberry Pi-specifikus CI/smoke ellenőrzések.
 
 9. **Professional Effect Bank workflow**
-   - [ ] Azonos firmware-ID esetén választható Replace, ne vak duplikáció.
+   - [x] Azonos firmware-ID esetén Replace, ne vak duplikáció (`resolve_effects`, exportkor a bank egyező ID-jű bejegyzését cseréli, nem hibázik duplikációval).
    - [ ] Thumbnail vagy animált mini előnézet minden effekthez.
-   - [ ] Rendezés ID, név, flash-méret vagy lejátszási hossz szerint.
-   - [ ] Keresés és projekttel együtt menthető címkék.
-   - [ ] Export előtti változáslista: hozzáadás, csere, átnevezés, ID-váltás, törlés.
+   - [x] Rendezés ID, név, flash-méret vagy lejátszási hossz szerint (`Sort:` gomb a Bank Content lista fölött).
+   - [x] Keresés (élő, ID/név/méret/időtartam token-egyezés) - a projekttel együtt menthető címkék még nincsenek.
+   - [ ] Export előtti változáslista **dialógusként** (jelenleg a `describe_changes` eredménye az export utáni státuszsorban jelenik meg, nem egy megerősítő ablakban).
    - [ ] Egyetlen effekt külön importja és exportja.
    - [ ] `Optimize bank` elemzés pazarló FPS-re, túl hosszú effektre és loopolható szakaszokra.
-   - [ ] Összesített flash-foglalás mellett a bank teljes becsült lejátszási ideje.
+   - [x] Összesített flash-foglalás mellett a bank teljes becsült lejátszási ideje (`total_playback_ms`, a kapacitás-sorban).

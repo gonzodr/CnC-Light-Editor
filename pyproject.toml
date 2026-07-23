@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cnc-light-editor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Layered, keyframe-based playfield light effect editor for CnC Pinball"
 requires-python = ">=3.10"
 dependencies = ["pygame-ce>=2.5,<3"]

@@ -15,6 +15,14 @@ import pygame
 
 from .autosave import AutosaveManager, RecoveryRecord
 from .engine import point_inside, render_leds, sample_gradient
+from .effect_bank import (
+    SORT_MODES,
+    describe_changes,
+    effect_matches,
+    resolve_effects,
+    sort_effects,
+    total_playback_ms,
+)
 from .effect_importer import ImportedEffect, load_effect_data
 from .exporter import (
     EFFECT_BANK_CAPACITY,
@@ -253,6 +261,9 @@ class Editor:
         self.export_bank_id_input = ""
         self.export_bank_input_select_all = False
         self.export_bank_status = "Map an effect_data.h or export the current project"
+        self.export_bank_sort_mode = "id"
+        self.export_bank_query = ""
+        self.export_bank_query_editing = False
         self.file_browser_open = False
         self.file_browser_mode = "open"
         self.file_browser_purpose = ""
@@ -3517,15 +3528,18 @@ class Editor:
         if led_errors:
             raise ValueError("LED map: " + "; ".join(led_errors))
         current = project_to_imported_effect(self.project, self.led_map.export_slots())
-        destination = export_effect_bank(
-            [*deepcopy(self.export_bank_effects), current],
-            path,
-            max_bytes=EFFECT_BANK_CAPACITY,
-        )
+        # resolve_effects replaces a bank entry that already carries the current
+        # project's firmware ID instead of appending a duplicate (which the
+        # exporter would otherwise reject at write time).
+        combined = resolve_effects(deepcopy(self.export_bank_effects), current)
+        changes = describe_changes(self.export_bank_effects, combined)
+        destination = export_effect_bank(combined, path, max_bytes=EFFECT_BANK_CAPACITY)
         self.export_bank_path = destination.resolve()
+        change_summary = "; ".join(change.description for change in changes)
         self.export_bank_status = (
-            f"Exported {len(self.export_bank_effects) + 1} effects — "
+            f"Exported {len(combined)} effects — "
             f"{self._export_bank_used_bytes() / 1024:.1f} KiB"
+            + (f" — {change_summary}" if change_summary else "")
         )
         self.status = f"Effect bank exported: {destination.name}"
         return destination
@@ -3551,12 +3565,28 @@ class Editor:
         )
 
     def _export_bank_used_bytes(self) -> int:
-        return self.project.flash_bytes + sum(effect.flash_bytes for effect in self.export_bank_effects)
+        # Mirrors resolve_effects' replace-by-id semantics without baking the
+        # project's frames: a bank entry sharing the current effect ID gets
+        # replaced on export, not added on top of, so its bytes are excluded
+        # from the total instead of double-counted.
+        replaced_bytes = sum(
+            effect.flash_bytes for effect in self.export_bank_effects
+            if effect.effect_id == self.project.effect_id
+        )
+        return (
+            self.project.flash_bytes
+            + sum(effect.flash_bytes for effect in self.export_bank_effects)
+            - replaced_bytes
+        )
 
     def _export_bank_validation_errors(self) -> list[str]:
-        ids = [self.project.effect_id, *(effect.effect_id for effect in self.export_bank_effects)]
-        duplicates = sorted({effect_id for effect_id in ids if ids.count(effect_id) > 1})
-        errors = [f"Duplicate ID {effect_id}" for effect_id in duplicates]
+        # Only flag IDs that repeat WITHIN the bank itself - that is genuinely
+        # ambiguous. The current project sharing an ID with one bank entry is
+        # not an error: export_effect_bank_file() replaces that slot instead
+        # of appending a duplicate (see resolve_effects in effect_bank.py).
+        bank_ids = [effect.effect_id for effect in self.export_bank_effects]
+        duplicates = sorted({effect_id for effect_id in bank_ids if bank_ids.count(effect_id) > 1})
+        errors = [f"Duplicate ID {effect_id} in bank" for effect_id in duplicates]
         used = self._export_bank_used_bytes()
         if used > EFFECT_BANK_CAPACITY:
             errors.append(f"Over capacity by {(used - EFFECT_BANK_CAPACITY) / 1024:.1f} KiB")
@@ -3569,6 +3599,25 @@ class Editor:
         if 0 <= self.export_bank_selected < len(self.export_bank_effects):
             return self.export_bank_effects[self.export_bank_selected]
         return None
+
+    def _export_bank_visible_pairs(self) -> list[tuple[int, ImportedEffect]]:
+        """(real index into export_bank_effects, effect), filtered by the search
+        query and ordered by the current sort mode. The pinned "current project"
+        row is handled separately by callers - this only covers mapped/bank
+        effects, since searching/sorting the project you're actively editing
+        isn't useful (it's always shown first).
+
+        Effect IDs are unique within export_bank_effects (enforced by
+        _export_bank_validation_errors and the ID-edit commit path), so
+        matching sorted effects back to their original index by ID is safe.
+        """
+        query = self.export_bank_query.strip()
+        candidates = self.export_bank_effects
+        if query:
+            candidates = [effect for effect in candidates if effect_matches(effect, query)]
+        ordered = sort_effects(candidates, self.export_bank_sort_mode)
+        index_by_id = {effect.effect_id: index for index, effect in enumerate(self.export_bank_effects)}
+        return [(index_by_id[effect.effect_id], effect) for effect in ordered]
 
     def _load_export_bank_project(self, confirm: bool = True) -> bool:
         effect = self._export_bank_selected_effect()
@@ -3605,17 +3654,18 @@ class Editor:
         if event.type == pygame.KEYDOWN:
             if self.export_bank_name_editing or self.export_bank_id_editing:
                 self._handle_export_bank_input(event)
+            elif self.export_bank_query_editing:
+                self._handle_export_bank_query_input(event)
             elif event.key == pygame.K_ESCAPE:
                 self.export_bank_open = False
                 self.status = "Closed Effect Bank"
             return
         if event.type == pygame.MOUSEWHEEL:
-            panel = self._export_bank_panel_rect()
-            list_rect = pygame.Rect(panel.x + 26, panel.y + 224, panel.width - 398, panel.height - 294)
+            _toolbar, list_rect, _detail = self._export_bank_layout()
             mouse = getattr(event, "pos", pygame.mouse.get_pos())
             if list_rect.collidepoint(mouse):
                 visible = max(1, list_rect.height // 53)
-                maximum = max(0, len(self.export_bank_effects) + 1 - visible)
+                maximum = max(0, len(self._export_bank_visible_pairs()) + 1 - visible)
                 self.export_bank_scroll = max(0, min(maximum, self.export_bank_scroll - event.y))
             return
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -3634,6 +3684,22 @@ class Editor:
             self._export_bank_action(action)
 
     def _export_bank_action(self, action: str) -> None:
+        if action != "export_bank_query_focus":
+            self.export_bank_query_editing = False
+        if action == "export_bank_sort_cycle":
+            index = SORT_MODES.index(self.export_bank_sort_mode)
+            self.export_bank_sort_mode = SORT_MODES[(index + 1) % len(SORT_MODES)]
+            self.export_bank_scroll = 0
+            return
+        if action == "export_bank_query_focus":
+            self.export_bank_query_editing = True
+            self.export_bank_name_editing = False
+            self.export_bank_id_editing = False
+            return
+        if action == "export_bank_query_clear":
+            self.export_bank_query = ""
+            self.export_bank_scroll = 0
+            return
         if action == "export_bank_close":
             self.export_bank_open = False
             self.status = "Closed Effect Bank"
@@ -3667,6 +3733,19 @@ class Editor:
             self.export_bank_selected = int(action.split(":", 1)[1])
             self.export_bank_name_editing = False
             self.export_bank_id_editing = False
+
+    def _handle_export_bank_query_input(self, event: pygame.event.Event) -> None:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+            self.export_bank_query_editing = False
+            return
+        if event.key == pygame.K_BACKSPACE:
+            self.export_bank_query = self.export_bank_query[:-1]
+            self.export_bank_scroll = 0
+            return
+        character = getattr(event, "unicode", "")
+        if character.isprintable():
+            self.export_bank_query = (self.export_bank_query + character)[:40]
+            self.export_bank_scroll = 0
 
     def _handle_export_bank_input(self, event: pygame.event.Event) -> None:
         ctrl = bool(getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL)
@@ -5681,6 +5760,16 @@ class Editor:
         panel.center = self.screen.get_rect().center
         return panel
 
+    def _export_bank_layout(self) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect]:
+        """Toolbar (sort + search), bank content list, and selected-effect
+        detail rects for the Effect Bank screen - shared by the draw and the
+        mouse-wheel event handler so their geometry never drifts apart."""
+        panel = self._export_bank_panel_rect()
+        toolbar = pygame.Rect(panel.x + 26, panel.y + 224, panel.width - 52, 30)
+        list_rect = pygame.Rect(panel.x + 26, toolbar.bottom + 29, panel.width - 398, panel.height - 353)
+        detail = pygame.Rect(list_rect.right + 18, list_rect.y, panel.right - list_rect.right - 44, list_rect.height)
+        return toolbar, list_rect, detail
+
     def _file_browser_panel_rect(self) -> pygame.Rect:
         width = min(980, self.screen.get_width() - 50)
         height = min(700, self.screen.get_height() - 50)
@@ -5959,9 +6048,20 @@ class Editor:
         frame_ms = max(1, int(self.project.frame_ms or 50))
         free_seconds = (free // 204) * frame_ms / 1000.0
         capacity_y = panel.y + 83
+        # Cheap replace-by-id total (mirrors _export_bank_used_bytes): the
+        # project's own duration_ms is used directly instead of baking its
+        # frames just to call total_playback_ms on it every draw.
+        replaced_ms = sum(
+            effect.duration_ms for effect in self.export_bank_effects
+            if effect.effect_id == self.project.effect_id
+        )
+        bank_seconds = (
+            self.project.duration_ms + total_playback_ms(self.export_bank_effects) - replaced_ms
+        ) / 1000.0
         summary = (
             f"{used / 1024:.1f} KiB used  /  {EFFECT_BANK_CAPACITY / 1024:.0f} KiB   ·   "
-            f"{free / 1024:.1f} KiB free   ·   ≈{free_seconds:.1f}s at {1000 / frame_ms:.2f} FPS"
+            f"{free / 1024:.1f} KiB free   ·   ≈{free_seconds:.1f}s at {1000 / frame_ms:.2f} FPS   ·   "
+            f"{bank_seconds:.1f}s total bank playback"
         )
         summary_color = (255, 104, 92) if used > EFFECT_BANK_CAPACITY else (104, 221, 165)
         self.screen.blit(self.font.render(summary, True, summary_color), (x, capacity_y))
@@ -5997,8 +6097,44 @@ class Editor:
             (x, memory.bottom + 12),
         )
 
-        list_rect = pygame.Rect(x, panel.y + 224, panel.width - 398, panel.height - 294)
-        detail = pygame.Rect(list_rect.right + 18, list_rect.y, panel.right - list_rect.right - 44, list_rect.height)
+        toolbar, list_rect, detail = self._export_bank_layout()
+
+        sort_rect = pygame.Rect(toolbar.x, toolbar.y, 128, toolbar.height)
+        self._button(sort_rect, "export_bank_sort_cycle", f"Sort: {self.export_bank_sort_mode.title()}", False)
+        search_rect = pygame.Rect(sort_rect.right + 10, toolbar.y, 240, toolbar.height)
+        pygame.draw.rect(self.screen, (42, 47, 58), search_rect, border_radius=4)
+        pygame.draw.rect(
+            self.screen, ACCENT if self.export_bank_query_editing else (74, 81, 98),
+            search_rect, 1, border_radius=4,
+        )
+        placeholder = not self.export_bank_query and not self.export_bank_query_editing
+        query_value = "Search bank…" if placeholder else self.export_bank_query
+        if self.export_bank_query_editing and (pygame.time.get_ticks() // 500) % 2 == 0:
+            query_value += "|"
+        query_color = (129, 138, 158) if placeholder else (238, 241, 247)
+        self.screen.blit(
+            self.small.render(self._fit_text(query_value, self.small, search_rect.width - 16), True, query_color),
+            (search_rect.x + 8, search_rect.y + 8),
+        )
+        self.buttons.append((search_rect, "export_bank_query_focus", "Search bank"))
+        if self.export_bank_query:
+            self._button(pygame.Rect(search_rect.right + 8, toolbar.y, 30, toolbar.height), "export_bank_query_clear", "×", False)
+
+        visible_pairs = self._export_bank_visible_pairs()
+        if self.export_bank_query:
+            count_surface = self.small.render(
+                f"{len(visible_pairs)}/{len(self.export_bank_effects)} shown", True, (159, 168, 187),
+            )
+            self.screen.blit(count_surface, (toolbar.right - count_surface.get_width(), toolbar.y + 8))
+
+        # Keeps a bank effect's colour block the same in the (always
+        # unfiltered) memory bar above and in this filtered/sorted list.
+        order_by_index = {index: order for order, (index, _name, _bytes) in enumerate(entries)}
+        list_entries = [
+            (-1, self.project.name, self.project.flash_bytes),
+            *[(index, effect.name, effect.flash_bytes) for index, effect in visible_pairs],
+        ]
+
         self.screen.blit(self.font.render("BANK CONTENT", True, (211, 216, 228)), (list_rect.x, list_rect.y - 29))
         self.screen.blit(self.font.render("SELECTED EFFECT", True, (211, 216, 228)), (detail.x, detail.y - 29))
         pygame.draw.rect(self.screen, (20, 23, 30), list_rect, border_radius=6)
@@ -6007,16 +6143,15 @@ class Editor:
         pygame.draw.rect(self.screen, (57, 63, 77), detail, 1, border_radius=6)
 
         visible = max(1, list_rect.height // 53)
-        maximum_scroll = max(0, len(entries) - visible)
+        maximum_scroll = max(0, len(list_entries) - visible)
         self.export_bank_scroll = min(self.export_bank_scroll, maximum_scroll)
         for visible_index, (entry_index, name, byte_count) in enumerate(
-            entries[self.export_bank_scroll:self.export_bank_scroll + visible]
+            list_entries[self.export_bank_scroll:self.export_bank_scroll + visible]
         ):
-            absolute_order = self.export_bank_scroll + visible_index
             row = pygame.Rect(list_rect.x + 7, list_rect.y + 7 + visible_index * 53, list_rect.width - 14, 46)
             selected = entry_index == self.export_bank_selected
             pygame.draw.rect(self.screen, (47, 58, 78) if selected else (31, 35, 44), row, border_radius=5)
-            color = BANK_COLORS[absolute_order % len(BANK_COLORS)]
+            color = BANK_COLORS[order_by_index[entry_index] % len(BANK_COLORS)]
             bar_width = max(3, round(byte_count / EFFECT_BANK_CAPACITY * (row.width - 8)))
             pygame.draw.rect(self.screen, color, (row.x + 4, row.bottom - 7, min(row.width - 8, bar_width), 3), border_radius=2)
             if entry_index == -1:

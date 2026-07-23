@@ -1891,6 +1891,110 @@ def test_effect_bank_rejects_duplicate_id_and_exports_current_project_with_bank(
     assert effects[1].project_data is not None
 
 
+def test_export_effect_bank_file_replaces_bank_entry_sharing_current_project_id(tmp_path):
+    black = [[(0, 0, 0)] * 68]
+    editor = make_editor()
+    editor.project.name = "New version"
+    editor.project.effect_id = 4
+    editor.project.duration_ms = 50
+    editor.project.frame_ms = 50
+    editor.export_bank_effects = [ImportedEffect("Old version", black, effect_id=4)]
+
+    # Sharing an ID with the project is a replace, not a duplicate: the byte
+    # estimate and validation must agree before export actually happens.
+    assert editor._export_bank_used_bytes() == editor.project.flash_bytes
+    assert editor._export_bank_validation_errors() == []
+
+    path = editor.export_effect_bank_file(tmp_path / "combined.h")
+    effects = parse_effect_data(path.read_text(encoding="utf-8"))
+    assert [(effect.effect_id, effect.name) for effect in effects] == [(4, "New version")]
+    assert effects[0].project_data is not None
+
+
+def test_export_bank_validation_allows_project_id_match_but_flags_bank_internal_duplicates():
+    black = [[(0, 0, 0)] * 68]
+    editor = make_editor()
+    editor.project.effect_id = 4
+    editor.export_bank_effects = [ImportedEffect("Existing", black, effect_id=4)]
+
+    assert editor._export_bank_validation_errors() == []
+
+    editor.export_bank_effects.append(ImportedEffect("Existing 2", black, effect_id=4))
+    errors = editor._export_bank_validation_errors()
+    assert any("Duplicate ID 4" in error for error in errors)
+
+
+def test_export_bank_search_filters_and_sort_modes_reorder_bank_effects():
+    black = [[(0, 0, 0)] * 68]
+    editor = make_editor()
+    editor.export_bank_effects = [
+        ImportedEffect("Alpha", black * 3, effect_id=5, frame_ms=50),
+        ImportedEffect("Bravo", black * 1, effect_id=2, frame_ms=50),
+        ImportedEffect("Charlie", black * 2, effect_id=9, frame_ms=100),
+    ]
+
+    def names(pairs):
+        return [effect.name for _index, effect in pairs]
+
+    assert editor.export_bank_sort_mode == "id"
+    assert names(editor._export_bank_visible_pairs()) == ["Bravo", "Alpha", "Charlie"]
+
+    editor._export_bank_action("export_bank_sort_cycle")
+    assert editor.export_bank_sort_mode == "name"
+    assert names(editor._export_bank_visible_pairs()) == ["Alpha", "Bravo", "Charlie"]
+
+    editor._export_bank_action("export_bank_sort_cycle")
+    assert editor.export_bank_sort_mode == "size"
+    assert names(editor._export_bank_visible_pairs()) == ["Alpha", "Charlie", "Bravo"]
+
+    editor._export_bank_action("export_bank_sort_cycle")
+    assert editor.export_bank_sort_mode == "duration"
+    assert names(editor._export_bank_visible_pairs()) == ["Charlie", "Alpha", "Bravo"]
+
+    editor._export_bank_action("export_bank_sort_cycle")
+    assert editor.export_bank_sort_mode == "id"
+
+    editor.export_bank_query = "al"
+    filtered = editor._export_bank_visible_pairs()
+    assert names(filtered) == ["Alpha"]
+    assert filtered[0][0] == 0  # real index into export_bank_effects, not the filtered position
+
+
+def test_export_bank_query_focus_and_typing_updates_query_without_closing_panel():
+    editor = make_editor()
+    editor.export_bank_open = True
+
+    editor._export_bank_action("export_bank_query_focus")
+    assert editor.export_bank_query_editing is True
+
+    for character in "abc":
+        editor._handle_export_bank_query_input(
+            pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a, unicode=character, mod=0)
+        )
+    assert editor.export_bank_query == "abc"
+
+    editor._handle_export_bank_query_input(
+        pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, unicode="", mod=0)
+    )
+    assert editor.export_bank_query_editing is False
+    assert editor.export_bank_open is True
+    assert editor.export_bank_query == "abc"
+
+    # Routed through the real dispatcher (not the handler directly): once
+    # Escape cleared query_editing, a Backspace keydown isn't routed to the
+    # query handler anymore, so the typed text survives untouched.
+    editor._handle_export_bank_event(
+        pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE, unicode="", mod=0)
+    )
+    assert editor.export_bank_query == "abc"
+    assert editor.export_bank_open is True
+
+    # Any other bank action clears query focus (mirrors clicking elsewhere).
+    editor._export_bank_action("export_bank_query_focus")
+    editor._export_bank_action("export_bank_close")
+    assert editor.export_bank_query_editing is False
+
+
 def test_effect_bank_edits_current_export_name_and_id_as_undoable_project_settings():
     editor = make_editor()
     editor.export_bank_selected = -1
