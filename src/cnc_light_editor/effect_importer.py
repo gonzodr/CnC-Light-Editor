@@ -14,6 +14,10 @@ CHANNELS_PER_LED = 3
 BYTES_PER_FRAME = EFFECT_LEDS * CHANNELS_PER_LED
 DEFAULT_FRAME_MS = 50
 LEGACY_FRAME_MS = 60
+# Headers written by the exporter store the fx_* tables XOR-masked (see
+# FX_DATA_MASK in exporter.py) and announce it with this #define. Headers
+# without it are read as-is, so pre-mask files still import unchanged.
+FX_DATA_MASK_DEFINE = "FX_DATA_MASK_APPLIED"
 BLACK: Color = (0, 0, 0)
 FASTLED_COLORS: dict[str, Color] = {
     "White": (255, 255, 255),
@@ -117,6 +121,7 @@ def _parse_v4_effects(
     source: str, embedded_projects: dict[int, dict] | None = None,
 ) -> list[ImportedEffect]:
     embedded_projects = embedded_projects or {}
+    data_mask = _detect_data_mask(source)
     arrays: dict[str, list[int]] = {}
     array_pattern = re.compile(
         r"(?:static\s+)?const\s+uint8_t\s+(fx_[A-Za-z_]\w*)\s*\[\s*\]\s+"
@@ -128,7 +133,8 @@ def _parse_v4_effects(
         values = [_parse_integer(value) for value in re.findall(r"0[xX][0-9A-Fa-f]+|\d+", body)]
         if any(not 0 <= value <= 255 for value in values):
             raise ValueError(f"{symbol}: RGB values must be between 0 and 255")
-        arrays[symbol] = values
+        # Undo the exporter's XOR so everything downstream sees real RGB.
+        arrays[symbol] = [value ^ data_mask for value in values] if data_mask else values
 
     table_match = re.search(
         r"const\s+EffectDef\s+bakedEffects\s*\[\s*\]\s*(?:PROGMEM\s*)?=\s*\{(.*?)\}\s*;",
@@ -218,6 +224,23 @@ def _parse_legacy_effects(source: str) -> list[ImportedEffect]:
     if not effects:
         raise ValueError("No V4 bakedEffects table or legacy EffectID arrays found in the selected header")
     return effects
+
+
+def _detect_data_mask(source: str) -> int:
+    """Read the XOR mask the header was written with, or 0 if it carries none.
+
+    Comments are already stripped by the caller, so a commented-out #define
+    correctly reads as "not masked" instead of silently scrambling the import.
+    """
+    match = re.search(
+        rf"#\s*define\s+{FX_DATA_MASK_DEFINE}\s+(0[xX][0-9A-Fa-f]+|\d+)", source
+    )
+    if not match:
+        return 0
+    mask = _parse_integer(match.group(1))
+    if not 0 <= mask <= 255:
+        raise ValueError(f"{FX_DATA_MASK_DEFINE} must be between 0 and 255, got {mask}")
+    return mask
 
 
 def _strip_comments(source: str) -> str:

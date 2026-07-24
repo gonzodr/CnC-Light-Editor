@@ -167,3 +167,43 @@ def test_v4_import_rejects_intro_frames_past_loop_end():
 
     with pytest.raises(ValueError, match="introFrames"):
         parse_effect_data(source)
+
+
+def mask_test_header(values: list[int], define: str = "") -> str:
+    body = ",".join(str(value) for value in values)
+    return (
+        f"{define}\n"
+        f"const uint8_t fx_one[] PROGMEM = {{ {body} }};\n"
+        "const EffectDef bakedEffects[] = {\n"
+        '  { 1, "One", fx_one, 1, 50, 1, 1, 0, 0 },\n'
+        "};\n"
+    )
+
+
+def test_v4_header_without_a_mask_define_is_read_as_raw_data():
+    values = [7] * (EFFECT_LEDS * 3)
+    effect = parse_effect_data(mask_test_header(values))[0]
+
+    assert effect.frames[0][0] == (7, 7, 7)
+
+
+def test_v4_header_with_a_mask_define_is_decoded_back_to_real_rgb():
+    values = [7 ^ 0x5A] * (EFFECT_LEDS * 3)
+    source = mask_test_header(values, "#define FX_DATA_MASK_APPLIED 0x5A")
+
+    assert parse_effect_data(source)[0].frames[0][0] == (7, 7, 7)
+
+
+def test_a_commented_out_mask_define_does_not_scramble_the_import():
+    values = [7] * (EFFECT_LEDS * 3)
+    source = mask_test_header(values, "// #define FX_DATA_MASK_APPLIED 0x5A")
+
+    assert parse_effect_data(source)[0].frames[0][0] == (7, 7, 7)
+
+
+def test_an_out_of_range_mask_define_is_rejected():
+    values = [7] * (EFFECT_LEDS * 3)
+    source = mask_test_header(values, "#define FX_DATA_MASK_APPLIED 300")
+
+    with pytest.raises(ValueError, match="between 0 and 255"):
+        parse_effect_data(source)

@@ -15,6 +15,15 @@ BYTES_PER_FRAME = FIRMWARE_LED_COUNT * 3
 EFFECT_BANK_CAPACITY = 150 * 1024
 TRANSPARENT_SENTINEL = (255, 0, 255)
 
+# The Mega's USB-serial link (ATmega16U2 -> ATmega2560 UART) is sensitive to
+# specific byte patterns: one particular 256-byte page of raw effect data
+# reliably killed the avrdude transfer at 28%, on every host, while the same
+# page XOR-masked went up fine. Storing the fx_* tables masked scrambles those
+# patterns; the firmware XORs them back when reading (see FX_DATA_MASK in
+# d_light_effects.ino). Both sides must use the same value.
+FX_DATA_MASK = 0x5A
+FX_DATA_MASK_DEFINE = "FX_DATA_MASK_APPLIED"
+
 
 def sample_project_frames(
     project: Project,
@@ -104,8 +113,13 @@ def export_effect_bank(
         "// Embedded CnC Light projects are compressed Base64 comments and consume no firmware flash.",
         f"// Effect bank: {len(effects)} effects, {total_bytes} bytes{capacity_note}.",
         "// Opacity, easing and fades are pre-composited into the RGB values.",
+        f"// fx_* data is stored XOR 0x{FX_DATA_MASK:02X}: raw effect bytes could contain patterns that",
+        "// break the avrdude upload over the Mega's USB-serial link. The firmware decodes",
+        "// on read (FX_DATA_MASK in d_light_effects.ino) - both sides must match.",
         "#include <Arduino.h>",
         "#include <avr/pgmspace.h>",
+        "",
+        f"#define {FX_DATA_MASK_DEFINE} 0x{FX_DATA_MASK:02X}",
         "",
         "struct EffectDef {",
         "  uint8_t id;",
@@ -133,7 +147,9 @@ def export_effect_bank(
         for frame_index, colors in enumerate(effect.frames):
             frame = [channel for color in colors for channel in color]
             lines.append(f"  // frame {frame_index}")
-            lines.append("  " + ", ".join(str(value) for value in frame) + ",")
+            lines.append(
+                "  " + ", ".join(str(value ^ FX_DATA_MASK) for value in frame) + ","
+            )
         lines.append("};")
         if effect.project_data is not None:
             lines.extend(embedded_project_lines(effect.effect_id, effect.project_data))

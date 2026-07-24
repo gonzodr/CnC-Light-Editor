@@ -189,3 +189,71 @@ def test_export_round_trips_intro_frames_and_rejects_intro_past_loop_end(tmp_pat
     project.intro_frames = 5  # past the loop end (4) - must be rejected
     with pytest.raises(ValueError, match="introFrames"):
         export_arduino_header(project, [(0.5, 0.5)], tmp_path / "bad.h")
+
+
+def test_effect_data_is_xor_masked_and_announced_so_the_upload_survives(tmp_path):
+    # A raw effect-data page reliably killed the avrdude transfer at 28% on
+    # every host; the same page XOR-masked went up fine. The exporter must
+    # therefore never write raw RGB, and must tell the firmware the mask.
+    shape = Shape("rectangle", "all", width=1.0, height=1.0, color=(1, 2, 3))
+    project = Project(
+        "Masked", duration_ms=50, fps=20, effect_id=9, frame_ms=50,
+        layers=[Layer("one", shapes=[shape])],
+    )
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "effect_data.h")
+    text = path.read_text(encoding="utf-8")
+
+    assert "#define FX_DATA_MASK_APPLIED 0x5A" in text
+    # (1, 2, 3) must appear masked, never as the raw triple.
+    assert f"  {1 ^ 0x5A}, {2 ^ 0x5A}, {3 ^ 0x5A}," in text
+    assert "\n  1, 2, 3," not in text
+
+
+def test_masked_export_round_trips_back_to_the_original_colors(tmp_path):
+    shape = Shape("rectangle", "all", width=1.0, height=1.0, color=(90, 0, 255))
+    project = Project(
+        "Round trip", duration_ms=100, fps=10, effect_id=4, frame_ms=50,
+        layers=[Layer("one", shapes=[shape])],
+    )
+    path = export_arduino_header(project, [(0.5, 0.5)] * 3, tmp_path / "effect_data.h")
+    effect = parse_effect_data(path.read_text(encoding="utf-8"))[0]
+
+    # 90 == 0x5A, so an un-masked reader would decode this pixel to (0, ...).
+    assert effect.frames[0][0] == (90, 0, 255)
+    assert effect.frames[0][2] == (90, 0, 255)
+
+
+def test_exported_bank_round_trips_every_effect_through_the_mask(tmp_path):
+    first = ImportedEffect("One", [[(10, 20, 30)] * 68], 50, 1)
+    second = ImportedEffect("Two", [[(90, 90, 90)] * 68], 50, 2)
+    path = export_effect_bank([first, second], tmp_path / "effect_data.h")
+
+    restored = parse_effect_data(path.read_text(encoding="utf-8"))
+    assert [effect.name for effect in restored] == ["One", "Two"]
+    assert restored[0].frames[0][0] == (10, 20, 30)
+    assert restored[1].frames[0][0] == (90, 90, 90)
+
+
+def test_an_existing_unmasked_header_migrates_to_masked_on_re_export(tmp_path):
+    # Every effect_data.h written before the mask existed is raw. Loading one
+    # and exporting it again must produce a masked file with identical colors,
+    # so upgrading an existing bank needs no manual conversion step.
+    values = ",".join(str(value) for value in [11, 22, 33] * 68)
+    legacy = (
+        f"const uint8_t fx_old[] PROGMEM = {{ {values} }};\n"
+        "const EffectDef bakedEffects[] = {\n"
+        '  { 3, "Old", fx_old, 1, 50, 1, 1, 0, 0 },\n'
+        "};\n"
+    )
+    before = parse_effect_data(legacy)
+    assert before[0].frames[0][0] == (11, 22, 33)
+
+    path = export_effect_bank(before, tmp_path / "effect_data.h")
+    text = path.read_text(encoding="utf-8")
+    after = parse_effect_data(text)
+
+    assert "#define FX_DATA_MASK_APPLIED 0x5A" in text
+    assert f"  {11 ^ 0x5A}, {22 ^ 0x5A}, {33 ^ 0x5A}," in text
+    assert after[0].frames[0][0] == (11, 22, 33)
+    assert after[0].effect_id == 3
+    assert after[0].name == "Old"
