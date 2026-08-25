@@ -383,6 +383,40 @@ def test_shapes_and_random_led_effects_cannot_be_added_to_canvas_layer():
     assert canvas_layer.effects == []
 
 
+def test_falloff_layer_is_unique_keyframeable_and_has_duration_controls():
+    editor = make_editor()
+
+    editor._action("falloff_layer")
+    falloff = editor.project.layers[-1]
+
+    assert falloff.is_falloff is True
+    assert falloff.falloff_ms == 600
+    assert editor.project.falloff_duration_at(0) == 600
+    editor.current_ms = 500
+    editor._action("falloff_state:0")
+    assert editor.project.falloff_duration_at(500) == 0
+    editor._action("falloff_ms:100")
+    assert falloff.falloff_ms == 700
+    editor._action("falloff_layer")
+    assert sum(layer.is_falloff for layer in editor.project.layers) == 1
+
+    editor.draw()
+    actions = {action for _rect, action, _label in editor.buttons}
+    assert {"falloff_state:0", "falloff_state:1", "falloff_ms:-100", "falloff_ms:100"} <= actions
+
+
+def test_shapes_and_generator_effects_cannot_be_added_to_falloff_layer():
+    editor = make_editor()
+    editor._action("falloff_layer")
+    falloff = editor.project.layers[-1]
+
+    editor._create_shape("ellipse", (0.5, 0.5))
+    editor._action("random_led_editor")
+
+    assert falloff.shapes == []
+    assert falloff.effects == []
+
+
 def test_layer_can_be_renamed_from_inspector_and_undone():
     editor = make_editor()
     editor.draw()
@@ -1985,6 +2019,26 @@ def test_stencil_glows_mix_overlapping_led_colors():
     assert pixel.g == 0
 
 
+def test_stencil_uses_light_blue_background_while_canvas_is_active():
+    editor = make_editor()
+    editor.project.overlay = True
+    editor._action("canvas_layer")
+    canvas, _, _ = editor.layout()
+    sample = (canvas.x + 10, canvas.y + 10)
+    editor.screen.fill((0, 0, 0))
+
+    editor._draw_leds(canvas, stencil_back=True)
+    active = editor.screen.get_at(sample)
+
+    assert active.b > active.r
+    assert active.g > active.r
+    editor.current_ms = 50
+    editor._action("canvas_state:0")
+    editor.screen.fill((0, 0, 0))
+    editor._draw_leds(canvas, stencil_back=True)
+    assert editor.screen.get_at(sample)[:3] == (0, 0, 0)
+
+
 def test_gradient_editor_adds_moves_and_recolors_stops():
     editor = make_editor()
     editor._create_shape("rectangle", (0.5, 0.5))
@@ -2459,7 +2513,7 @@ def test_export_toolbar_opens_visual_effect_bank_with_memory_blocks():
 
     assert editor.export_bank_open is True
     assert {
-        "export_bank_map", "export_bank_write", "export_bank_close",
+        "export_bank_map", "export_bank_write", "export_bank_write_as", "export_bank_close",
         "export_bank_select:-1", "export_bank_edit_name", "export_bank_edit_id",
     } <= actions
 
@@ -2564,6 +2618,59 @@ def test_export_effect_bank_file_replaces_bank_entry_sharing_current_project_id(
     effects = parse_effect_data(path.read_text(encoding="utf-8"))
     assert [(effect.effect_id, effect.name) for effect in effects] == [(4, "New version")]
     assert effects[0].project_data is not None
+
+
+def test_mapped_bank_saves_in_place_and_refreshes_without_remapping(tmp_path):
+    black = [[(0, 0, 0)] * 68]
+    target = export_effect_bank(
+        [ImportedEffect("Existing", black, effect_id=7)],
+        tmp_path / "effect_data.h",
+    )
+    editor = make_editor()
+    editor.project.name = "New effect"
+    editor.project.effect_id = 8
+    editor.project.duration_ms = 50
+    editor.project.frame_ms = 50
+    editor.map_effect_bank_file(target)
+
+    assert editor.save_mapped_effect_bank() is True
+
+    assert editor.file_browser_open is False
+    assert [(effect.effect_id, effect.name) for effect in editor.export_bank_effects] == [
+        (7, "Existing"), (8, "New effect"),
+    ]
+    assert [(effect.effect_id, effect.name) for effect in editor.imported_effects] == [
+        (7, "Existing"), (8, "New effect"),
+    ]
+    assert [(effect.effect_id, effect.name) for effect in parse_effect_data(
+        target.read_text(encoding="utf-8")
+    )] == [(7, "Existing"), (8, "New effect")]
+
+
+def test_mapped_bank_requires_confirmation_before_accidental_id_replacement(tmp_path):
+    black = [[(0, 0, 0)] * 68]
+    target = export_effect_bank(
+        [ImportedEffect("Protected", black, effect_id=4)],
+        tmp_path / "effect_data.h",
+    )
+    before = target.read_text(encoding="utf-8")
+    editor = make_editor()
+    editor.project.name = "Unrelated project"
+    editor.project.effect_id = 4
+    editor.project.duration_ms = 50
+    editor.project.frame_ms = 50
+    editor.map_effect_bank_file(target)
+
+    assert editor.save_mapped_effect_bank() is False
+    assert editor.confirmation_open is True
+    assert editor.confirmation_action == "save_mapped_bank"
+    assert target.read_text(encoding="utf-8") == before
+
+    editor._resolve_confirmation(True)
+    restored = parse_effect_data(target.read_text(encoding="utf-8"))[0]
+    assert restored.name == "Unrelated project"
+    assert restored.symbol == "fx_protected"  # rename does not churn the far-address symbol
+    assert editor.export_bank_project_origin_id == 4
 
 
 def test_export_bank_validation_allows_project_id_match_but_flags_bank_internal_duplicates():
@@ -2704,7 +2811,7 @@ def test_export_effect_bank_file_keeps_a_single_rolling_backup_of_the_previous_e
     assert sorted(p.name for p in tmp_path.iterdir()) == ["effect_data.h", "effect_data.h.bak"]
 
 
-def test_restore_export_bank_backup_reloads_previous_effects_without_touching_disk(tmp_path):
+def test_restore_export_bank_backup_is_an_immediate_on_disk_undo_and_can_redo(tmp_path):
     editor = make_editor()
     editor.project.effect_id = 1
     editor.project.duration_ms = 50
@@ -2719,7 +2826,10 @@ def test_restore_export_bank_backup_reloads_previous_effects_without_touching_di
     assert editor.restore_export_bank_backup() is True
     assert [effect.name for effect in editor.export_bank_effects] == ["Version A"]
     assert "Restored backup" in editor.export_bank_status
-    # In-memory only - the exported file is untouched until the user exports again.
+    assert parse_effect_data(target.read_text(encoding="utf-8"))[0].name == "Version A"
+    assert parse_effect_data(editor._export_bank_backup_path(target).read_text(encoding="utf-8"))[0].name == "Version B"
+
+    assert editor.restore_export_bank_backup() is True
     assert parse_effect_data(target.read_text(encoding="utf-8"))[0].name == "Version B"
 
 

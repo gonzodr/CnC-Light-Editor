@@ -34,6 +34,7 @@ from .exporter import (
     TRANSPARENT_SENTINEL,
     export_effect_bank,
     project_to_imported_effect,
+    sample_project_frames,
 )
 from .ledmap import Led, LedMap
 from .model import (
@@ -94,6 +95,7 @@ ACTION_TOOLTIPS = {
     "snap": "Snap timeline edits and the playhead to exact frame boundaries",
     "import_effect_data": "Import and preview effects from effect_data.h",
     "canvas_layer": "Add the keyframeable Canvas transparency layer",
+    "falloff_layer": "Add a keyframeable temporal fade-out layer",
     "generator_menu_toggle": "Add or edit a firmware-order layer effect (Random LED, Strobe, Color Cycle, Pulse, Comet)",
     "duplicate_layer": "Ctrl+D · Duplicate the active layer",
     "delete_layer": "Delete the active layer",
@@ -201,7 +203,7 @@ HELP_COLUMNS = (
             ("Shift + Space", "Play / pause, looping only the loop section"),
             ("|<  /  >|", "Step exactly one frame"),
             ("K", "Add keyframe at playhead"),
-            ("V", "Toggle shape or Canvas state"),
+            ("V", "Toggle shape, Canvas or Falloff state"),
             ("Ctrl + C / V", "Copy / paste selected keyframes"),
             ("Delete", "Delete selected keyframes or shape"),
             ("G", "Toggle snapping"),
@@ -216,9 +218,9 @@ HELP_COLUMNS = (
             ("Ctrl + D", "Duplicate active layer"),
             ("F2 / layer R", "Rename active layer"),
             ("Layer L", "Lock or unlock layer editing"),
-            ("C+ button", "Add the keyframeable Canvas layer"),
-            ("Layer ON/OFF", "Toggle layer; Canvas creates a keyframe"),
-            ("Enable / Disable", "Write an explicit Canvas state key"),
+            ("C+ / F+", "Add Canvas / temporal Falloff layer"),
+            ("Layer ON/OFF", "Special layers create a state keyframe"),
+            ("Enable / Disable", "Write an explicit special-layer state key"),
             ("Delete", "Delete a layer selected in the timeline"),
         )),
         ("VIEWPORT / SHAPES", (
@@ -262,6 +264,7 @@ _CRASH_LOG_SEPARATOR = "=" * 70 + "\n"
 ACCENT = (77, 148, 255)
 PANEL = (31, 34, 42)
 PANEL_DARK = (24, 26, 33)
+CANVAS_STENCIL_BACKGROUND = (40, 112, 142)
 
 TIMELINE_PROPERTY_LABELS = {
     "x": "Position X", "y": "Position Y",
@@ -273,6 +276,7 @@ TIMELINE_PROPERTY_LABELS = {
     "gradient_angle": "Gradient angle", "visible": "Visibility",
     "enabled": "Enabled",
     "canvas_enabled": "Canvas enabled",
+    "falloff_enabled": "Falloff enabled",
     "layer_opacity": "Layer opacity",
 }
 GRAPH_NUMERIC_PROPERTIES = {
@@ -382,6 +386,7 @@ class Editor:
         self.help_open = False
         self.export_bank_effects: list[ImportedEffect] = []
         self.export_bank_path: Path | None = None
+        self.export_bank_project_origin_id: int | None = None
         self.export_bank_selected = -1
         self.export_bank_scroll = 0
         self.export_bank_name_editing = False
@@ -399,6 +404,9 @@ class Editor:
         # name/ID keep their cached thumbnail; a fresh map/import gets a new
         # frames list and so a fresh (uncached) one.
         self._effect_thumbnail_cache: dict[tuple, pygame.Surface] = {}
+        self._falloff_preview_project_state: dict | None = None
+        self._falloff_preview_slots: list[tuple[float, float] | None] | None = None
+        self._falloff_preview_frames: list[tuple[int, ...]] = []
         self.file_browser_open = False
         self.file_browser_mode = "open"
         self.file_browser_purpose = ""
@@ -1217,7 +1225,7 @@ class Editor:
             self._action("keyframe")
         elif event.key == pygame.K_v:
             layer = self.project.layers[self.active_layer]
-            if layer.is_canvas:
+            if layer.is_canvas or layer.is_falloff:
                 self._action(f"toggle_layer:{self.active_layer}")
             elif self.selected:
                 state = self.selected.state_at(self.current_ms)
@@ -1258,10 +1266,10 @@ class Editor:
             action.startswith((
                 "add:", "color:", "custom_color:", "fill_mode:", "gradient_type:",
                 "gradient_radial_mode:", "toggle_layer:", "toggle_layer_lock:",
-                "canvas_state:",
+                "canvas_state:", "falloff_state:", "falloff_ms:",
             ))
             or action in {
-                "layer", "canvas_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
+                "layer", "canvas_layer", "falloff_layer", "duplicate_layer", "delete_layer", "delete", "duplicate", "keyframe",
                 "effect_id:-1", "effect_id:1", "cycle_fps", "loops:-1", "loops:1",
                 "clear_loop_end", "toggle_overlay",
                 "gradient_add_stop", "gradient_delete_stop",
@@ -1273,7 +1281,10 @@ class Editor:
         if mutating:
             self._begin_change()
         if action.startswith("add:"):
-            if self.project.layers[self.active_layer].is_canvas:
+            if (
+                self.project.layers[self.active_layer].is_canvas
+                or self.project.layers[self.active_layer].is_falloff
+            ):
                 self.status = "Select a regular layer before adding a shape"
             else:
                 self._create_shape(action.split(":", 1)[1], (0.5, 0.5), history=False)
@@ -1310,10 +1321,37 @@ class Editor:
                 self.timeline_expanded_layers.add(canvas_layer.id)
                 self._ensure_active_layer_visible()
                 self.status = "Canvas layer added — ON means empty LEDs stay transparent"
+        elif action == "falloff_layer":
+            existing = next(
+                (index for index, layer in enumerate(self.project.layers) if layer.is_falloff),
+                None,
+            )
+            if existing is not None:
+                self.active_layer = existing
+                self.timeline_selected_layer_id = None
+                self.selected = None
+                self._close_generator_panels()
+                self.timeline_expanded_layers.add(self.project.layers[existing].id)
+                self.status = "The project already has a Falloff layer"
+            else:
+                falloff_layer = Layer(
+                    "Falloff", is_falloff=True, falloff_enabled=True, falloff_ms=600,
+                )
+                falloff_layer.add_keyframe("falloff_enabled", 0, True)
+                self.project.layers.append(falloff_layer)
+                self.active_layer = len(self.project.layers) - 1
+                self.timeline_selected_layer_id = None
+                self.selected = None
+                self._close_generator_panels()
+                self.selected_keyframes = {(falloff_layer.id, "falloff_enabled", 0)}
+                self.timeline_expanded_layers.add(falloff_layer.id)
+                self._ensure_active_layer_visible()
+                self.status = "Falloff layer added — LEDs fade out over 600 ms"
         elif action == "duplicate_layer":
             source = self.project.layers[self.active_layer]
-            if source.is_canvas:
-                self.status = "A project can only have one Canvas layer"
+            if source.is_canvas or source.is_falloff:
+                kind = "Canvas" if source.is_canvas else "Falloff"
+                self.status = f"A project can only have one {kind} layer"
             else:
                 selected_index = source.shapes.index(self.selected) if self.selected in source.shapes else None
                 clone = deepcopy(source)
@@ -1362,12 +1400,14 @@ class Editor:
                     break
         elif action == "keyframe":
             layer = self.project.layers[self.active_layer]
-            if layer.is_canvas:
-                value = bool(layer.value_at("canvas_enabled", self.current_ms))
-                layer.add_keyframe("canvas_enabled", self.current_ms, value)
-                self.selected_keyframes = {(layer.id, "canvas_enabled", self.current_ms)}
+            if layer.is_canvas or layer.is_falloff:
+                prop = "canvas_enabled" if layer.is_canvas else "falloff_enabled"
+                value = bool(layer.value_at(prop, self.current_ms))
+                layer.add_keyframe(prop, self.current_ms, value)
+                self.selected_keyframes = {(layer.id, prop, self.current_ms)}
                 self.timeline_expanded_layers.add(layer.id)
-                self.status = f"Canvas keyframe at {self.current_ms} ms"
+                kind = "Canvas" if layer.is_canvas else "Falloff"
+                self.status = f"{kind} keyframe at {self.current_ms} ms"
             elif self.selected:
                 state = self.selected.state_at(self.current_ms)
                 for prop in (
@@ -1386,6 +1426,16 @@ class Editor:
             layer = self.project.layers[self.active_layer]
             if layer.is_canvas:
                 self._set_canvas_enabled_key(layer, bool(int(action.split(":", 1)[1])))
+        elif action.startswith("falloff_state:"):
+            layer = self.project.layers[self.active_layer]
+            if layer.is_falloff:
+                self._set_falloff_enabled_key(layer, bool(int(action.split(":", 1)[1])))
+        elif action.startswith("falloff_ms:"):
+            layer = self.project.layers[self.active_layer]
+            if layer.is_falloff:
+                delta = int(action.split(":", 1)[1])
+                layer.falloff_ms = max(100, min(2000, layer.falloff_ms + delta))
+                self.status = f"Falloff duration: {layer.falloff_ms} ms"
         elif action == "stencil":
             self.stencil = not self.stencil
             if self.stencil:
@@ -1443,7 +1493,10 @@ class Editor:
             kind = action[: -len("_editor")]
             info = GENERATOR_KINDS[kind]
             self.generator_menu_open = False
-            if self.project.layers[self.active_layer].is_canvas:
+            if (
+                self.project.layers[self.active_layer].is_canvas
+                or self.project.layers[self.active_layer].is_falloff
+            ):
                 self.status = f"Select a regular layer before adding a {info.menu_label} effect"
                 if mutating:
                     self._commit_change()
@@ -1741,6 +1794,10 @@ class Editor:
                 self.active_layer = index
                 enabled = not bool(layer.value_at("canvas_enabled", self.current_ms))
                 self._set_canvas_enabled_key(layer, enabled)
+            elif layer.is_falloff:
+                self.active_layer = index
+                enabled = not bool(layer.value_at("falloff_enabled", self.current_ms))
+                self._set_falloff_enabled_key(layer, enabled)
             else:
                 layer.visible = not layer.visible
                 if not layer.visible and self.selected in layer.shapes:
@@ -1772,7 +1829,7 @@ class Editor:
     def _action_requires_unlocked_layer(action: str) -> bool:
         if action.startswith((
             "add:", "color:", "fill_mode:", "gradient_type:",
-            "gradient_radial_mode:", "canvas_state:",
+            "gradient_radial_mode:", "canvas_state:", "falloff_state:", "falloff_ms:",
         )):
             return True
         if action in GENERATOR_EDITOR_ACTIONS:
@@ -1882,7 +1939,7 @@ class Editor:
         if active_layer.locked:
             self.status = f"Layer {active_layer.name} is locked"
             return
-        if active_layer.is_canvas:
+        if active_layer.is_canvas or active_layer.is_falloff:
             self.status = "Select a regular layer before adding a shape"
             return
         if history:
@@ -2027,7 +2084,7 @@ class Editor:
 
     @staticmethod
     def _layer_keyframe_targets(layer: Layer) -> list[Layer | Shape | RandomLedEffect]:
-        if layer.is_canvas:
+        if layer.is_canvas or layer.is_falloff:
             return [layer]
         return [*layer.shapes, *Editor._layer_generator_effects(layer)]
 
@@ -2650,7 +2707,10 @@ class Editor:
                 ),
                 None,
             )
-        elif self.project.layers[self.active_layer].is_canvas:
+        elif (
+            self.project.layers[self.active_layer].is_canvas
+            or self.project.layers[self.active_layer].is_falloff
+        ):
             layer_index = self.active_layer
         elif (kind := self._active_generator_panel_kind()) and self._active_generator_effect(kind):
             layer_index = self.active_layer
@@ -3173,6 +3233,17 @@ class Editor:
         mode = "transparent empty LEDs" if enabled else "blackout empty LEDs"
         self.status = f"Canvas {'enabled' if enabled else 'disabled'} at {self.current_ms} ms — {mode}"
 
+    def _set_falloff_enabled_key(self, layer: Layer, enabled: bool) -> None:
+        layer.add_keyframe("falloff_enabled", self.current_ms, enabled)
+        self.selected = None
+        self._close_generator_panels()
+        self.selected_keyframes = {(layer.id, "falloff_enabled", self.current_ms)}
+        self.timeline_expanded_layers.add(layer.id)
+        self.status = (
+            f"Falloff {'enabled' if enabled else 'disabled'} at {self.current_ms} ms"
+            + (f" — {layer.falloff_ms} ms fade" if enabled else "")
+        )
+
     def _set_rotation_total(self, total_degrees: float) -> None:
         turns = math.floor(total_degrees / 360.0)
         angle = total_degrees - turns * 360.0
@@ -3235,7 +3306,7 @@ class Editor:
 
     def _active_keyframe_target(self) -> Layer | Shape | RandomLedEffect | None:
         layer = self.project.layers[self.active_layer]
-        if layer.is_canvas:
+        if layer.is_canvas or layer.is_falloff:
             return layer
         kind = self._active_generator_panel_kind()
         if kind:
@@ -3420,6 +3491,10 @@ class Editor:
     ) -> None:
         self.project = project
         self.project_path = project_path
+        self.export_bank_project_origin_id = None
+        self._falloff_preview_project_state = None
+        self._falloff_preview_slots = None
+        self._falloff_preview_frames = []
         self.saved_project_state = deepcopy(project.to_dict()) if saved else None
         self.selected = None
         self.selected_keyframes.clear()
@@ -3947,6 +4022,8 @@ class Editor:
         elif action == "load_bank_project" and isinstance(payload, int):
             self.export_bank_selected = payload
             self._load_export_bank_project(confirm=False)
+        elif action == "save_mapped_bank" and isinstance(payload, Path):
+            self.save_mapped_effect_bank(confirm_replacement=False)
         elif action == "complete_file_browser" and isinstance(payload, tuple):
             purpose, target = payload
             self._complete_file_browser_path(str(purpose), Path(target))
@@ -4020,6 +4097,19 @@ class Editor:
             backed_up = True
         destination = export_effect_bank(combined, path, max_bytes=EFFECT_BANK_CAPACITY)
         self.export_bank_path = destination.resolve()
+        # The file on disk is now the source of truth.  Keep every editor view
+        # in sync immediately so saving never requires a manual re-map just to
+        # see the effect that was written.
+        self.export_bank_effects = deepcopy(combined)
+        self.imported_effects = deepcopy(combined)
+        self.effect_data_path = self.export_bank_path
+        self.export_bank_project_origin_id = self.project.effect_id
+        self._effect_thumbnail_cache.clear()
+        self.ui_settings["last_effect_bank_header"] = str(self.export_bank_path)
+        try:
+            self.ui_settings_store.save(self.ui_settings)
+        except OSError:
+            pass
         change_summary = "; ".join(change.description for change in changes)
         self.export_bank_status = (
             f"Exported {len(combined)} effects — "
@@ -4030,23 +4120,78 @@ class Editor:
         self.status = f"Effect bank exported: {destination.name}"
         return destination
 
+    def save_mapped_effect_bank(self, *, confirm_replacement: bool = True) -> bool:
+        """Save straight back to the mapped header, with collision protection."""
+        if self.export_bank_path is None:
+            self._choose_export_bank_save()
+            return False
+        try:
+            current = project_to_imported_effect(self.project, self.led_map.export_slots())
+            planned = resolve_effects(deepcopy(self.export_bank_effects), current)
+            replacements = [
+                change for change in describe_changes(self.export_bank_effects, planned)
+                if change.kind == "REPLACE"
+            ]
+        except (TypeError, ValueError) as error:
+            self.export_bank_status = f"Save blocked: {error}"
+            return False
+        owns_slot = self.export_bank_project_origin_id == self.project.effect_id
+        if confirm_replacement and replacements and not owns_slot:
+            existing = next(
+                effect for effect in self.export_bank_effects
+                if effect.effect_id == self.project.effect_id
+            )
+            self._request_confirmation(
+                "Replace bank effect?",
+                f'ID {existing.effect_id} is "{existing.name}". Replace it with "{self.project.name}"?',
+                "save_mapped_bank",
+                self.export_bank_path,
+            )
+            self.export_bank_status = "Confirmation required before replacing an existing effect"
+            return False
+        try:
+            self.export_effect_bank_file(self.export_bank_path)
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            self.export_bank_status = f"Save failed: {error}"
+            return False
+        return True
+
     def restore_export_bank_backup(self) -> bool:
-        """Undo the last export_effect_bank_file() write: reload the single
-        rolling backup (the file's content right before it was last
-        overwritten) back into the in-memory bank. Does not touch disk -
-        the user still has to click Export bank… to write it back out."""
+        """Swap the mapped header and its rolling backup, then reload it.
+
+        Restoring only the in-memory list was misleading: the firmware file
+        stayed overwritten, and the next save could silently apply the same
+        current project again.  A restore is now an immediate on-disk undo;
+        the displaced version becomes the new backup, so the button can also
+        redo the swap if it was clicked by mistake.
+        """
         target = self.export_bank_path or EXPORT_FILE
         backup_path = self._export_bank_backup_path(target)
         if not backup_path.is_file():
             self.export_bank_status = "No backup available to restore"
             return False
-        effects = load_effect_data(backup_path)
+        temporary = target.with_name(f".{target.name}.restore.tmp")
+        try:
+            if target.is_file():
+                shutil.copy2(target, temporary)
+            shutil.copy2(backup_path, target)
+            if temporary.is_file():
+                temporary.replace(backup_path)
+            effects = load_effect_data(target)
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            if temporary.is_file():
+                temporary.unlink()
+            self.export_bank_status = f"Backup restore failed: {error}"
+            return False
         self.export_bank_effects = deepcopy(effects)
+        self.imported_effects = deepcopy(effects)
+        self.effect_data_path = Path(target).resolve()
+        self.export_bank_project_origin_id = None
         self.export_bank_selected = 0 if effects else -1
         self.export_bank_scroll = 0
         self.export_bank_status = (
-            f"Restored backup from before the last export ({len(effects)} effects) — "
-            "click Export bank… to write it back out"
+            f"Restored backup to {Path(target).name} ({len(effects)} effects) — "
+            "the displaced version is now the backup"
         )
         self._suggest_effect_id_if_still_default()
         return True
@@ -4224,6 +4369,7 @@ class Editor:
             saved=False,
             status=f"Loaded embedded project: {effect.name} · ID {effect.effect_id}",
         )
+        self.export_bank_project_origin_id = effect.effect_id
         return True
 
     def _handle_export_bank_event(self, event: pygame.event.Event) -> None:
@@ -4232,6 +4378,14 @@ class Editor:
                 self._handle_export_bank_input(event)
             elif self.export_bank_query_editing:
                 self._handle_export_bank_query_input(event)
+            elif (
+                event.key == pygame.K_s
+                and getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_CTRL
+            ):
+                if getattr(event, "mod", pygame.key.get_mods()) & pygame.KMOD_SHIFT:
+                    self._choose_export_bank_save()
+                else:
+                    self.save_mapped_effect_bank()
             elif event.key == pygame.K_ESCAPE:
                 self.export_bank_open = False
                 self.status = "Closed Effect Bank"
@@ -4284,6 +4438,12 @@ class Editor:
         elif action == "export_bank_map":
             self._choose_export_bank_map()
         elif action == "export_bank_write":
+            errors = self._export_bank_validation_errors()
+            if errors:
+                self.export_bank_status = "Export blocked: " + " · ".join(errors)
+            else:
+                self.save_mapped_effect_bank()
+        elif action == "export_bank_write_as":
             errors = self._export_bank_validation_errors()
             if errors:
                 self.export_bank_status = "Export blocked: " + " · ".join(errors)
@@ -5293,13 +5453,37 @@ class Editor:
             ]
         else:
             slots = self.led_map.export_slots()
-            active_colors = iter(render_leds(
-                self.project, [point for point in slots if point is not None], self.current_ms,
-            ))
-            firmware_colors = [
-                next(active_colors) if point is not None else (0, 0, 0)
-                for point in slots
-            ]
+            if any(layer.is_falloff for layer in self.project.layers):
+                state = self.project.to_dict()
+                if (
+                    state != self._falloff_preview_project_state
+                    or slots != self._falloff_preview_slots
+                ):
+                    self._falloff_preview_frames = sample_project_frames(self.project, slots)
+                    self._falloff_preview_project_state = deepcopy(state)
+                    self._falloff_preview_slots = list(slots)
+                frame_ms = max(1, int(self.project.frame_ms or 1))
+                frame_index = min(
+                    len(self._falloff_preview_frames) - 1,
+                    max(0, self.current_ms // frame_ms),
+                )
+                flattened = self._falloff_preview_frames[frame_index]
+                firmware_colors = [
+                    tuple(flattened[index:index + 3])
+                    for index in range(0, len(flattened), 3)
+                ]
+                firmware_colors = [
+                    (0, 0, 0) if color == TRANSPARENT_SENTINEL else color
+                    for color in firmware_colors
+                ]
+            else:
+                active_colors = iter(render_leds(
+                    self.project, [point for point in slots if point is not None], self.current_ms,
+                ))
+                firmware_colors = [
+                    next(active_colors) if point is not None else (0, 0, 0)
+                    for point in slots
+                ]
         return [
             firmware_colors[led.firmware_index]
             if 0 <= led.firmware_index < len(firmware_colors) else (0, 0, 0)
@@ -5484,7 +5668,9 @@ class Editor:
                     self._glow_canvas_cache.clear()
                 glow_layer = pygame.Surface(visible.size).convert()
                 self._glow_canvas_cache[visible.size] = glow_layer
-            glow_layer.fill((0, 0, 0))
+            glow_layer.fill(
+                CANVAS_STENCIL_BACKGROUND if self._stencil_canvas_active() else (0, 0, 0)
+            )
             light_radius = max(20, min(46, canvas.width // 10))
             for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
                 color = (0, 0, 0) if led.name.strip().upper() == "NULL" else rendered_color
@@ -5512,6 +5698,14 @@ class Editor:
             if canvas.width > 620 or self.calibration:
                 label = str(led.firmware_index)
                 self.screen.blit(self.small.render(label, True, (245, 245, 245)), (pos[0] + radius, pos[1] - radius))
+
+    def _stencil_canvas_active(self) -> bool:
+        effect = self._active_imported_effect()
+        if effect:
+            return effect.overlay and any(
+                color == TRANSPARENT_SENTINEL for color in effect.colors_at(self.current_ms)
+            )
+        return self.project.canvas_transparency_at(self.current_ms)
 
     def _glow_sprite(
         self, radius: int, color: tuple[int, int, int],
@@ -5721,7 +5915,9 @@ class Editor:
                 layer_selected = layer.id == self.timeline_selected_layer_id
                 layer_on = (
                     bool(layer.value_at("canvas_enabled", self.current_ms))
-                    if layer.is_canvas else layer.visible
+                    if layer.is_canvas else
+                    bool(layer.value_at("falloff_enabled", self.current_ms))
+                    if layer.is_falloff else layer.visible
                 )
                 if active_layer:
                     pygame.draw.rect(self.screen, (42, 54, 76), row_rect)
@@ -5740,7 +5936,10 @@ class Editor:
                     pygame.Rect(rect.x + 73, row_rect.y + 5, 22, 21),
                     f"toggle_timeline_layer:{index}", "v" if expanded else ">", expanded,
                 )
-                layer_text = f"C {layer.name}" if layer.is_canvas else layer.name
+                layer_text = (
+                    f"C {layer.name}" if layer.is_canvas else
+                    f"F {layer.name}" if layer.is_falloff else layer.name
+                )
                 while len(layer_text) > 5 and self.small.size(layer_text)[0] > 76:
                     layer_text = layer_text[:-4] + "..."
                 label = self.small.render(
@@ -5767,7 +5966,9 @@ class Editor:
                     and getattr(self, f"{target_generator_kind}_editor_open")
                     and index == self.active_layer
                 ) or (
-                    isinstance(target, Layer) and target.is_canvas and index == self.active_layer
+                    isinstance(target, Layer)
+                    and (target.is_canvas or target.is_falloff)
+                    and index == self.active_layer
                 )
                 if target_active:
                     pygame.draw.rect(self.screen, (35, 43, 58), row_rect)
@@ -5944,7 +6145,8 @@ class Editor:
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 12
         self._draw_panel_section(x, y, "Layers")
-        self._button(pygame.Rect(panel.right - 190, y - 3, 34, 25), "canvas_layer", "C+", False)
+        self._button(pygame.Rect(panel.right - 230, y - 3, 34, 25), "canvas_layer", "C+", False)
+        self._button(pygame.Rect(panel.right - 190, y - 3, 34, 25), "falloff_layer", "F+", False)
         fx_button = pygame.Rect(panel.right - 150, y - 3, 34, 25)
         self._generator_menu_anchor = fx_button
         self._button(
@@ -5964,11 +6166,16 @@ class Editor:
             eye = pygame.Rect(row.x + 5, row.y + 3, 24, 21)
             layer_on = (
                 bool(layer.value_at("canvas_enabled", self.current_ms))
-                if layer.is_canvas else layer.visible
+                if layer.is_canvas else
+                bool(layer.value_at("falloff_enabled", self.current_ms))
+                if layer.is_falloff else layer.visible
             )
             self._button(eye, f"toggle_layer:{index}", "●" if layer_on else "○", False)
-            prefix = "C" if layer.is_canvas else "≡"
-            name_color = (105, 218, 224) if layer.is_canvas else (228, 232, 241)
+            prefix = "C" if layer.is_canvas else "F" if layer.is_falloff else "≡"
+            name_color = (
+                (105, 218, 224) if layer.is_canvas else
+                (255, 190, 92) if layer.is_falloff else (228, 232, 241)
+            )
             editing_name = self.layer_name_editing_id == layer.id
             layer_name = self.layer_name_input if editing_name else layer.name
             if editing_name and (pygame.time.get_ticks() // 500) % 2 == 0:
@@ -5991,7 +6198,7 @@ class Editor:
             y += 31
 
         active_panel_layer = self.project.layers[self.active_layer]
-        if not active_panel_layer.is_canvas:
+        if not active_panel_layer.is_canvas and not active_panel_layer.is_falloff:
             opacity_field = pygame.Rect(x, y + 4, panel.width - 28, 30)
             editing_opacity = self.property_editing == "layer_opacity"
             self._numeric_property_widget(
@@ -6005,7 +6212,10 @@ class Editor:
         y += 10
         pygame.draw.line(self.screen, (58, 62, 74), (panel.x, y), (panel.right, y))
         y += 13
-        section_title = "Canvas control" if active_panel_layer.is_canvas else "Transform"
+        section_title = (
+            "Canvas control" if active_panel_layer.is_canvas else
+            "Falloff control" if active_panel_layer.is_falloff else "Transform"
+        )
         self._draw_panel_section(x, y, section_title)
         y += 31
         if self.selected:
@@ -6108,6 +6318,44 @@ class Editor:
                 "Enable: untouched LEDs use FF00FF / transparent.",
                 "Disable: untouched LEDs export opaque black.",
                 "The timeline ON/OFF button and V toggle the state.",
+            )
+            for tip in tips:
+                self.screen.blit(self.small.render(tip, True, (126, 136, 156)), (x, y))
+                y += 22
+        elif active_panel_layer.is_falloff:
+            enabled = bool(active_panel_layer.value_at("falloff_enabled", self.current_ms))
+            state_label = (
+                f"ENABLED · {active_panel_layer.falloff_ms} ms fade"
+                if enabled else "DISABLED · raw baked frames"
+            )
+            state_color = (105, 218, 174) if enabled else (255, 171, 83)
+            self.screen.blit(self.small.render(state_label, True, state_color), (x, y))
+            y += 30
+            self._button(
+                pygame.Rect(x, y, 132, 32), "falloff_state:1", "Enable key", enabled,
+            )
+            self._button(
+                pygame.Rect(x + 143, y, 132, 32), "falloff_state:0", "Disable key", not enabled,
+            )
+            y += 44
+            self.screen.blit(self.small.render("Fade duration", True, (172, 178, 193)), (x, y))
+            y += 21
+            self._button(pygame.Rect(x, y, 62, 30), "falloff_ms:-100", "−100", False)
+            duration = self.font.render(f"{active_panel_layer.falloff_ms} ms", True, (232, 236, 244))
+            self.screen.blit(duration, duration.get_rect(center=(x + 137, y + 15)))
+            self._button(pygame.Rect(x + 213, y, 62, 30), "falloff_ms:100", "+100", False)
+            y += 43
+            has_key = any(
+                frame.time_ms == self.current_ms
+                for frame in active_panel_layer.keyframes.get("falloff_enabled", [])
+            )
+            key_status = "Keyframe exists at playhead" if has_key else "No Falloff keyframe at playhead"
+            self.screen.blit(self.small.render(key_status, True, (151, 161, 180)), (x, y))
+            y += 27
+            tips = (
+                "Brightness increases stay immediate.",
+                "Brightness drops are baked into a smooth tail.",
+                "Use ON/OFF or V to keyframe where it applies.",
             )
             for tip in tips:
                 self.screen.blit(self.small.render(tip, True, (126, 136, 156)), (x, y))
@@ -6895,14 +7143,18 @@ class Editor:
         backup_path = self._export_bank_backup_path(self.export_bank_path or EXPORT_FILE)
         if backup_path.is_file():
             self._button(
-                pygame.Rect(panel.right - 480, y, 126, 32),
+                pygame.Rect(panel.right - 616, y, 126, 32),
                 "export_bank_restore_backup", "Restore backup", False,
             )
-        self._button(pygame.Rect(panel.right - 344, y, 126, 32), "export_bank_map", "Map header…", False)
+        self._button(pygame.Rect(panel.right - 480, y, 126, 32), "export_bank_map", "Map header…", False)
         errors = self._export_bank_validation_errors()
         self._button(
+            pygame.Rect(panel.right - 344, y, 126, 32), "export_bank_write_as",
+            "Save as…", not errors,
+        )
+        self._button(
             pygame.Rect(panel.right - 210, y, 126, 32), "export_bank_write",
-            "Export bank…", not errors,
+            "Save bank" if self.export_bank_path else "Choose file…", not errors,
         )
         self._button(pygame.Rect(panel.right - 76, y, 50, 32), "export_bank_close", "×", False)
 
@@ -7096,6 +7348,15 @@ class Editor:
             ("Canvas mode", "OVERLAY" if overlay else "FULL"),
             ("Editable project", "Embedded" if current or effect.project_data is not None else "Not available"),
         ]
+        if current:
+            existing = next(
+                (item for item in self.export_bank_effects if item.effect_id == effect_id),
+                None,
+            )
+            metadata.append((
+                "On save",
+                f'REPLACE ID {effect_id} · {existing.name}' if existing else f"ADD ID {effect_id}",
+            ))
         for label, value in metadata:
             self.screen.blit(self.small.render(label, True, (132, 141, 160)), (x, y))
             rendered = self.small.render(value, True, (220, 225, 235))

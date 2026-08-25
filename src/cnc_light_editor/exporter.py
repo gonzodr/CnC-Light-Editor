@@ -36,18 +36,74 @@ def sample_project_frames(
     slots.extend([None] * (FIRMWARE_LED_COUNT - len(slots)))
     active_points = [point for point in slots if point is not None]
 
+    falloff_output = [(0, 0, 0) for _point in slots]
+    falloff_starts = [[0, 0, 0] for _point in slots]
+    falloff_targets = [[0, 0, 0] for _point in slots]
+    falloff_elapsed = [[0, 0, 0] for _point in slots]
+    falloff_active = [[False, False, False] for _point in slots]
+
     frames: list[tuple[int, ...]] = []
     for frame_index in range(frame_count):
         time_ms = frame_index * frame_ms
         rendered, painted = render_leds_with_mask(project, active_points, time_ms)
         active_cells = iter(zip(rendered, painted))
+        raw_cells: list[tuple[tuple[int, int, int], bool]] = []
+        for point in slots:
+            raw_cells.append(((0, 0, 0), False) if point is None else next(active_cells))
+
+        falloff_ms = project.falloff_duration_at(time_ms)
+        processed: list[tuple[tuple[int, int, int], bool]] = []
+        for slot_index, (raw, is_painted) in enumerate(raw_cells):
+            if slots[slot_index] is None or falloff_ms <= 0:
+                output = raw
+                falloff_output[slot_index] = raw
+                falloff_starts[slot_index][:] = raw
+                falloff_targets[slot_index][:] = raw
+                falloff_elapsed[slot_index][:] = [0, 0, 0]
+                falloff_active[slot_index][:] = [False, False, False]
+            else:
+                previous = falloff_output[slot_index]
+                output_channels: list[int] = []
+                for channel in range(3):
+                    current = raw[channel]
+                    if current >= previous[channel]:
+                        value = current
+                        falloff_active[slot_index][channel] = False
+                        falloff_elapsed[slot_index][channel] = 0
+                    else:
+                        if not falloff_active[slot_index][channel]:
+                            falloff_starts[slot_index][channel] = previous[channel]
+                            falloff_targets[slot_index][channel] = current
+                            falloff_elapsed[slot_index][channel] = 0
+                            falloff_active[slot_index][channel] = True
+                        else:
+                            # A source that keeps dimming should not restart the
+                            # tail every frame.  Move its target down while the
+                            # original fade clock keeps running.
+                            falloff_targets[slot_index][channel] = min(
+                                falloff_targets[slot_index][channel], current,
+                            )
+                        falloff_elapsed[slot_index][channel] += frame_ms
+                        amount = min(
+                            1.0,
+                            falloff_elapsed[slot_index][channel] / max(1, falloff_ms),
+                        )
+                        start = falloff_starts[slot_index][channel]
+                        target = falloff_targets[slot_index][channel]
+                        value = max(current, round(start + (target - start) * amount))
+                        if amount >= 1.0 or value <= current:
+                            falloff_active[slot_index][channel] = False
+                    output_channels.append(max(0, min(255, value)))
+                output = tuple(output_channels)
+                falloff_output[slot_index] = output
+            processed.append((output, is_painted or any(output)))
+
         transparent_canvas = project.canvas_transparency_at(time_ms)
         colors = []
-        for point in slots:
+        for point, (color, is_painted) in zip(slots, processed):
             if point is None:
                 colors.append(TRANSPARENT_SENTINEL if project.overlay else (0, 0, 0))
                 continue
-            color, is_painted = next(active_cells)
             if transparent_canvas and not is_painted:
                 colors.append(TRANSPARENT_SENTINEL)
             elif project.overlay and color == TRANSPARENT_SENTINEL:
@@ -119,12 +175,14 @@ def export_effect_bank(
         "#include <Arduino.h>",
         "#include <avr/pgmspace.h>",
         "",
+        "// Keep Arduino core pin tables below 64 KiB; this bank is read with far access.",
+        '#define FX_DATA_PROGMEM __attribute__((section(".text.fxdata"), used))',
+        "",
         f"#define {FX_DATA_MASK_DEFINE} 0x{FX_DATA_MASK:02X}",
         "",
         "struct EffectDef {",
         "  uint8_t id;",
         "  const char* name;",
-        "  const uint8_t* data;",
         "  uint16_t frames;",
         "  uint16_t frameMs;",
         "  uint8_t loops;",
@@ -142,7 +200,7 @@ def export_effect_bank(
             "",
             f"// {effect.name}: {len(effect.frames)} frames, {effect.flash_bytes} bytes, "
             f"{effect.actual_fps:.3f} FPS; {mode}.",
-            f"const uint8_t {symbol}[] PROGMEM = {{",
+            f"const uint8_t {symbol}[] FX_DATA_PROGMEM = {{",
         ])
         for frame_index, colors in enumerate(effect.frames):
             frame = [channel for color in colors for channel in color]
@@ -155,15 +213,26 @@ def export_effect_bank(
             lines.extend(embedded_project_lines(effect.effect_id, effect.project_data))
     lines.extend([
         "",
+        "// Generated far-flash lookup: d_light_effects.ino calls this by effect ID.",
+        "static inline uint_farptr_t bakedEffectFarAddress(uint8_t id) {",
+        "  switch (id) {",
+    ])
+    for effect, symbol in zip(effects, symbols):
+        lines.append(f"    case {effect.effect_id}: return pgm_get_far_address({symbol});")
+    lines.extend([
+        "    default: return 0;",
+        "  }",
+        "}",
+        "",
         "const EffectDef bakedEffects[] = {",
-        "  // ID, name, data, frames, frameMs, loops, loopFrames, overlay, introFrames",
+        "  // ID, name, frames, frameMs, loops, loopFrames, overlay, introFrames",
     ])
     for effect, symbol in zip(effects, symbols):
         escaped_name = effect.name.replace("\\", "\\\\").replace('"', '\\"')
         loop_frames = effect.normalized_loop_frames
         intro_frames = effect.normalized_intro_frames
         lines.append(
-            f'  {{ {effect.effect_id}, "{escaped_name}", {symbol}, {len(effect.frames)}, '
+            f'  {{ {effect.effect_id}, "{escaped_name}", {len(effect.frames)}, '
             f"{effect.frame_ms}, {effect.loops}, {loop_frames}, {int(bool(effect.overlay))}, "
             f"{intro_frames} }},"
         )
@@ -220,7 +289,11 @@ def _unique_symbols(effects: list[ImportedEffect]) -> list[str]:
     symbols: list[str] = []
     used: set[str] = set()
     for effect in effects:
-        base = f"fx_{_identifier(effect.name)}"
+        base = (
+            effect.symbol
+            if re.fullmatch(r"fx_[A-Za-z_]\w*", effect.symbol or "")
+            else f"fx_{_identifier(effect.name)}"
+        )
         symbol = base
         suffix = 2
         while symbol in used:

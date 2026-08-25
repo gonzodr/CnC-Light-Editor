@@ -169,6 +169,35 @@ def test_v4_import_rejects_intro_frames_past_loop_end():
         parse_effect_data(source)
 
 
+def test_imports_far_progmem_firmware_rows_without_legacy_data_pointer():
+    red = ",".join(map(str, [255, 0, 0] * EFFECT_LEDS))
+    blue = ",".join(map(str, [0, 0, 255] * EFFECT_LEDS))
+    source = f"""
+    #define FX_DATA_PROGMEM __attribute__((section(".text.fxdata"), used))
+    const uint8_t fx_red[] FX_DATA_PROGMEM = {{ {red} }};
+    const uint8_t fx_blue[] FX_DATA_PROGMEM = {{ {blue} }};
+    static inline uint_farptr_t bakedEffectFarAddress(uint8_t id) {{
+      switch (id) {{
+        case 9: return pgm_get_far_address(fx_blue);
+        case 3: return pgm_get_far_address(fx_red);
+        default: return 0;
+      }}
+    }}
+    const EffectDef bakedEffects[] = {{
+      {{ 9, "Blue", 1, 50, 1, 1, 0, 0 }},
+      {{ 3, "Red", 1, 50, 1, 1, 0, 0 }},
+    }};
+    """
+
+    effects = parse_effect_data(source)
+
+    assert [(effect.effect_id, effect.symbol) for effect in effects] == [
+        (9, "fx_blue"), (3, "fx_red"),
+    ]
+    assert effects[0].frames[0][0] == (0, 0, 255)
+    assert effects[1].frames[0][0] == (255, 0, 0)
+
+
 def mask_test_header(values: list[int], define: str = "") -> str:
     body = ",".join(str(value) for value in values)
     return (

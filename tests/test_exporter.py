@@ -15,8 +15,9 @@ def test_export_pads_playfield_map_to_68_leds_and_writes_v4_metadata(tmp_path):
     text = path.read_text(encoding="utf-8")
     effect = parse_effect_data(text)[0]
 
-    assert "const uint8_t fx_launch_flash[] PROGMEM" in text
-    assert '{ 6, "Launch flash", fx_launch_flash, 2, 50, 3, 1, 1, 0 }' in text
+    assert "const uint8_t fx_launch_flash[] FX_DATA_PROGMEM" in text
+    assert "case 6: return pgm_get_far_address(fx_launch_flash);" in text
+    assert '{ 6, "Launch flash", 2, 50, 3, 1, 1, 0 }' in text
     assert effect.effect_id == 6
     assert effect.frame_ms == 50
     assert effect.loops == 3
@@ -99,8 +100,8 @@ def test_effect_bank_exports_multiple_editable_effect_definitions(tmp_path):
 
     assert [effect.effect_id for effect in loaded] == [2, 7]
     assert [effect.name for effect in loaded] == ["Pulse", "Pulse"]
-    assert "const uint8_t fx_pulse[] PROGMEM" in text
-    assert "const uint8_t fx_pulse_2[] PROGMEM" in text
+    assert "const uint8_t fx_pulse[] FX_DATA_PROGMEM" in text
+    assert "const uint8_t fx_pulse_2[] FX_DATA_PROGMEM" in text
 
 
 def test_effect_bank_rejects_duplicate_ids_and_capacity_overflow(tmp_path):
@@ -131,6 +132,50 @@ def test_overlay_canvas_layer_switches_empty_cells_between_black_and_sentinel(tm
 
     assert frames[0][0] == (0, 0, 0)
     assert frames[1][0] == (255, 0, 255)
+
+
+def test_falloff_layer_bakes_a_linear_fade_after_a_led_turns_off(tmp_path):
+    shape = Shape(
+        "rectangle", "flash", width=1.0, height=1.0, color=(255, 120, 60),
+    )
+    shape.add_keyframe("visible", 0, True)
+    shape.add_keyframe("visible", 50, False)
+    falloff = Layer("Falloff", is_falloff=True, falloff_enabled=True, falloff_ms=200)
+    falloff.add_keyframe("falloff_enabled", 0, True)
+    project = Project(
+        "smooth tail", duration_ms=250, frame_ms=50,
+        layers=[Layer("art", shapes=[shape]), falloff],
+    )
+
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "falloff.h")
+    frames = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames
+
+    assert [frame[0] for frame in frames] == [
+        (255, 120, 60),
+        (191, 90, 45),
+        (128, 60, 30),
+        (64, 30, 15),
+        (0, 0, 0),
+    ]
+
+
+def test_falloff_layer_can_be_disabled_mid_timeline(tmp_path):
+    shape = Shape("rectangle", "flash", width=1.0, height=1.0, color=(255, 255, 255))
+    shape.add_keyframe("visible", 0, True)
+    shape.add_keyframe("visible", 50, False)
+    falloff = Layer("Falloff", is_falloff=True, falloff_enabled=True, falloff_ms=500)
+    falloff.add_keyframe("falloff_enabled", 0, True)
+    falloff.add_keyframe("falloff_enabled", 100, False)
+    project = Project(
+        duration_ms=150, frame_ms=50,
+        layers=[Layer("art", shapes=[shape]), falloff],
+    )
+
+    path = export_arduino_header(project, [(0.5, 0.5)], tmp_path / "falloff-off.h")
+    frames = parse_effect_data(path.read_text(encoding="utf-8"))[0].frames
+
+    assert frames[1][0] == (230, 230, 230)
+    assert frames[2][0] == (0, 0, 0)
 
 
 def test_export_uses_first_future_keyframe_value_before_its_timestamp(tmp_path):
@@ -182,7 +227,7 @@ def test_export_round_trips_intro_frames_and_rejects_intro_past_loop_end(tmp_pat
     text = path.read_text(encoding="utf-8")
     effect = parse_effect_data(text)[0]
 
-    assert '{ 8, "intro test", fx_intro_test, 5, 50, 4, 4, 0, 1 }' in text
+    assert '{ 8, "intro test", 5, 50, 4, 4, 0, 1 }' in text
     assert effect.intro_frames == 1
     assert effect.normalized_intro_frames == 1
 

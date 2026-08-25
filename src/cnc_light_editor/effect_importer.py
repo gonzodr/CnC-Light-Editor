@@ -125,7 +125,7 @@ def _parse_v4_effects(
     arrays: dict[str, list[int]] = {}
     array_pattern = re.compile(
         r"(?:static\s+)?const\s+uint8_t\s+(fx_[A-Za-z_]\w*)\s*\[\s*\]\s+"
-        r"PROGMEM\s*=\s*\{(.*?)\}\s*;",
+        r"(?:PROGMEM|FX_DATA_PROGMEM)\s*=\s*\{(.*?)\}\s*;",
         re.DOTALL,
     )
     for match in array_pattern.finditer(source):
@@ -144,19 +144,35 @@ def _parse_v4_effects(
     if not table_match:
         raise ValueError("No bakedEffects[] table found in the selected V4 header")
 
+    far_address_symbols = {
+        int(raw_id): symbol
+        for raw_id, symbol in re.findall(
+            r"case\s+(\d+)\s*:\s*return\s+pgm_get_far_address\s*\(\s*"
+            r"(fx_[A-Za-z_]\w*)\s*\)\s*;",
+            source,
+        )
+    }
+    array_symbols = list(arrays)
     row_pattern = re.compile(
         r"\{\s*(\d+)\s*,\s*\"((?:\\.|[^\"\\])*)\"\s*,\s*"
-        r"(fx_[A-Za-z_]\w*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
+        r"(?:(fx_[A-Za-z_]\w*)\s*,\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
         r"\s*(?:,\s*(\d+))?\s*(?:,\s*(\d+))?\s*\}"
     )
     effects: list[ImportedEffect] = []
     seen_ids: set[int] = set()
-    for match in row_pattern.finditer(table_match.group(1)):
+    for row_index, match in enumerate(row_pattern.finditer(table_match.group(1))):
         (
-            raw_id, raw_name, symbol, raw_frames, raw_frame_ms, raw_loops,
+            raw_id, raw_name, row_symbol, raw_frames, raw_frame_ms, raw_loops,
             raw_loop_frames, raw_overlay, raw_intro_frames,
         ) = match.groups()
         effect_id = int(raw_id)
+        symbol = row_symbol or far_address_symbols.get(effect_id)
+        if symbol is None and row_index < len(array_symbols):
+            # The first far-PROGMEM firmware revision removed the 16-bit data
+            # pointer before the generated address switch lived in the header.
+            # Those transitional files keep arrays and metadata rows in the
+            # same order, so retain compatibility with them as well.
+            symbol = array_symbols[row_index]
         frame_count = int(raw_frames)
         frame_ms = int(raw_frame_ms)
         loops = int(raw_loops) or 1

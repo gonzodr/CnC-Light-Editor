@@ -224,6 +224,9 @@ class Layer:
     comet_effects: list[CometEffect] = field(default_factory=list)
     is_canvas: bool = False
     canvas_enabled: bool = True
+    is_falloff: bool = False
+    falloff_enabled: bool = True
+    falloff_ms: int = 600
     id: str = field(default_factory=lambda: uuid4().hex[:10])
     keyframes: dict[str, list[Keyframe]] = field(default_factory=dict)
 
@@ -308,6 +311,26 @@ class Project:
             layer.visible and bool(layer.value_at("canvas_enabled", time_ms))
             for layer in canvas_layers
         )
+
+    def falloff_duration_at(self, time_ms: int) -> int:
+        """Return the active baked fade-out duration for this instant.
+
+        Falloff is a temporal post-process, represented as a special layer so
+        it can be switched on and off from the same stepped timeline UI as the
+        Canvas layer.  A project only needs one such layer, but taking the
+        maximum keeps older/hand-edited project files deterministic if they
+        happen to contain more than one.
+        """
+        durations = (
+            max(0, int(layer.falloff_ms))
+            for layer in self.layers
+            if (
+                layer.is_falloff
+                and layer.visible
+                and bool(layer.value_at("falloff_enabled", time_ms))
+            )
+        )
+        return max(durations, default=0)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

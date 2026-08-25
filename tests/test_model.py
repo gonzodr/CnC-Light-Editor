@@ -287,6 +287,22 @@ def test_canvas_layer_enabled_state_is_stepped_keyframeable_and_persisted(tmp_pa
     assert [frame.time_ms for frame in loaded.layers[1].keyframes["canvas_enabled"]] == [0, 500]
 
 
+def test_falloff_layer_duration_and_enabled_keys_persist(tmp_path):
+    falloff = Layer("Falloff", is_falloff=True, falloff_enabled=True, falloff_ms=700)
+    falloff.add_keyframe("falloff_enabled", 0, True)
+    falloff.add_keyframe("falloff_enabled", 500, False)
+    project = Project(layers=[Layer("Art"), falloff])
+    path = tmp_path / "falloff.cnclight"
+
+    project.save(path)
+    loaded = Project.load(path)
+
+    assert loaded.layers[1].is_falloff is True
+    assert loaded.layers[1].falloff_ms == 700
+    assert loaded.falloff_duration_at(499) == 700
+    assert loaded.falloff_duration_at(500) == 0
+
+
 def test_old_project_fps_is_migrated_to_integer_frame_ms(tmp_path):
     path = tmp_path / "legacy.cnclight"
     path.write_text(json.dumps({"name": "old", "fps": 30, "layers": []}), encoding="utf-8")

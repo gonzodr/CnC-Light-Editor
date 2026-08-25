@@ -66,7 +66,7 @@ def render_leds_with_mask(
     result: list[tuple[float, float, float]] = [(0.0, 0.0, 0.0) for _point in points]
     painted = [False for _point in points]
     for layer in project.layers:
-        if not layer.visible or layer.is_canvas:
+        if not layer.visible or layer.is_canvas or layer.is_falloff:
             continue
         layer_opacity = max(0.0, min(1.0, float(layer.opacity)))
         if layer_opacity <= 0.0:

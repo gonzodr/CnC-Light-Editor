@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable
 
 from .effect_importer import ImportedEffect
@@ -25,7 +25,11 @@ def resolve_effects(
     for effect in mapped:
         if effect.effect_id == current.effect_id:
             if not inserted:
-                result.append(current)
+                # Keep the existing firmware symbol stable when an editable
+                # project replaces a mapped bank entry.  Names are user-facing
+                # and may change; the symbol is part of the generated far-flash
+                # address map and should not churn just because of a rename.
+                result.append(replace(current, symbol=effect.symbol or current.symbol))
                 inserted = True
             continue
         result.append(effect)
@@ -95,5 +99,5 @@ def _payload_fingerprint(effect: ImportedEffect) -> tuple:
     frames = tuple(tuple(frame) for frame in effect.frames)
     return (
         frames, effect.frame_ms, effect.loops, effect.loop_frames,
-        effect.overlay, effect.project_data,
+        effect.overlay, effect.project_data, effect.intro_frames,
     )
