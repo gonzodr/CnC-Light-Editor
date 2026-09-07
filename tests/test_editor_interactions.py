@@ -51,6 +51,30 @@ def make_editor() -> Editor:
     return editor
 
 
+def test_convert_mapped_bank_preserves_entries_and_opens_save_browser(tmp_path):
+    editor = make_editor()
+    source = tmp_path / 'original.h'
+    effects = [ImportedEffect('Original', [[(12, 3, 4)] * 68], effect_id=1, symbol='fx_original')]
+    export_effect_bank(effects, source)
+    editor.map_effect_bank_file(source)
+    original = source.read_bytes()
+    editor._choose_export_bank_convert()
+    assert editor.file_browser_purpose == 'bank_convert'
+    target = tmp_path / 'compressed.h'
+    assert editor._complete_file_browser_path('bank_convert', target)
+    assert '#define FX_FRAME_CODEC 1' in target.read_text()
+    assert parse_effect_data(target.read_text()) == parse_effect_data(source.read_text())
+    assert source.read_bytes() == original
+    assert editor.export_bank_path == source.resolve()
+    assert 'Converted 1 effects' in editor.export_bank_status
+    editor.map_effect_bank_file(target)
+    assert editor._bank_is_compressed()
+    assert editor._export_bank_used_bytes() == 7  # two offset bytes + mode + one run
+    assert editor._bank_effect_bytes(editor.export_bank_effects[0]) == 7
+    editor.map_effect_bank_file(source)
+    assert not editor._bank_is_compressed()
+
+
 def test_native_1280x1024_workspace_and_resolution_parser():
     assert _parse_resolution("1280x1024") == (1280, 1024)
     pygame.init()

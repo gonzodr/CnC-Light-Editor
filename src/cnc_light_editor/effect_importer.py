@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from .model import Color
+from .frame_codec import unpack_frames
 from .project_bundle import extract_embedded_projects
 
 
@@ -203,6 +204,11 @@ def _parse_v4_effects(
             raise ValueError(f"{name}: referenced data array {symbol} was not found")
 
         values = arrays[symbol]
+        codec = re.search(r"#define\s+FX_FRAME_CODEC\s+(\d+)", source)
+        if codec:
+            if int(codec.group(1)) != 1:
+                raise ValueError("Unsupported frame codec")
+            values = [c for frame in unpack_frames(values, frame_count) for rgb in frame for c in rgb]
         expected = frame_count * BYTES_PER_FRAME
         if len(values) != expected:
             raise ValueError(f"{name}: {len(values)} data bytes found, expected {expected} ({frame_count} * 204)")

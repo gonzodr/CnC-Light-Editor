@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 
 import argparse
 from copy import deepcopy
@@ -3852,6 +3853,8 @@ class Editor:
                 self.map_effect_bank_file(target)
             elif purpose == "bank_export":
                 self.export_effect_bank_file(target)
+            elif purpose == "bank_convert":
+                self.convert_effect_bank_file(target)
             else:
                 raise ValueError(f"Unknown file operation: {purpose}")
         except (OSError, TypeError, ValueError, KeyError) as error:
@@ -4047,6 +4050,8 @@ class Editor:
     def map_effect_bank_file(self, path: str | Path) -> None:
         target = Path(path)
         effects = load_effect_data(target)
+        self.export_bank_compressed = bool(re.search(r"#define\s+FX_FRAME_CODEC\s+1\b", target.read_text(encoding="utf-8")))
+        self._packed_size_cache = {}
         self.export_bank_effects = deepcopy(effects)
         self.export_bank_path = target.resolve()
         self.export_bank_selected = 0 if effects else -1
@@ -4096,6 +4101,7 @@ class Editor:
             shutil.copy2(target, self._export_bank_backup_path(target))
             backed_up = True
         destination = export_effect_bank(combined, path, max_bytes=EFFECT_BANK_CAPACITY)
+        self.export_bank_compressed = False
         self.export_bank_path = destination.resolve()
         # The file on disk is now the source of truth.  Keep every editor view
         # in sync immediately so saving never requires a manual re-map just to
@@ -4205,6 +4211,36 @@ class Editor:
             extension=".h",
         )
 
+    def convert_effect_bank_file(self, path: str | Path) -> Path:
+        """Convert the mapped bank exactly, without replacing entries from the canvas."""
+        from .frame_codec import pack_frames
+        effects = deepcopy(self.export_bank_effects)
+        if not effects:
+            raise ValueError("Map an effect bank before converting")
+        target = Path(path)
+        if target.is_file():
+            shutil.copy2(target, self._export_bank_backup_path(target))
+        destination = export_effect_bank(effects, target, compressed=True)
+        restored = load_effect_data(destination)
+        if any(a.frames != b.frames for a, b in zip(effects, restored)) or len(effects) != len(restored):
+            raise ValueError("Compressed bank verification failed")
+        raw = sum(e.flash_bytes for e in effects)
+        packed = sum(len(pack_frames(e.frames)) for e in effects)
+        self.export_bank_status = f"Converted {len(effects)} effects: {raw / 1024:.1f} -> {packed / 1024:.1f} KiB — {destination.name}"
+        self.status = self.export_bank_status
+        return destination
+
+    def _choose_export_bank_convert(self) -> None:
+        if not self.export_bank_effects:
+            self.export_bank_status = "Map an effect bank before converting"
+            return
+        default = self.export_bank_path or EXPORT_FILE
+        self._open_file_browser(
+            title="Convert entire mapped bank to compressed RGB (RLE)",
+            mode="save", purpose="bank_convert", initial_directory=default.parent,
+            extension=".h", filename="effect_data.h",
+        )
+
     def _choose_export_bank_save(self) -> None:
         default = self.export_bank_path or EXPORT_FILE
         self._open_file_browser(
@@ -4216,7 +4252,23 @@ class Editor:
             filename=default.name,
         )
 
+    def _bank_is_compressed(self) -> bool:
+        return getattr(self, "export_bank_compressed", False)
+
+    def _bank_effect_bytes(self, effect) -> int:
+        if not self._bank_is_compressed():
+            return effect.flash_bytes
+        from .frame_codec import pack_frames
+        cache = getattr(self, "_packed_size_cache", {})
+        key = id(effect)
+        if key not in cache or cache[key][0] is not effect:
+            cache[key] = (effect, len(pack_frames(effect.frames)))
+        self._packed_size_cache = cache
+        return cache[key][1]
+
     def _export_bank_used_bytes(self) -> int:
+        if self._bank_is_compressed():
+            return sum(self._bank_effect_bytes(e) for e in self.export_bank_effects)
         # Mirrors resolve_effects' replace-by-id semantics without baking the
         # project's frames: a bank entry sharing the current effect ID gets
         # replaced on export, not added on top of, so its bytes are excluded
@@ -4449,6 +4501,8 @@ class Editor:
                 self.export_bank_status = "Export blocked: " + " · ".join(errors)
             else:
                 self._choose_export_bank_save()
+        elif action == "export_bank_convert":
+            self._choose_export_bank_convert()
         elif action == "export_bank_load_project":
             self._load_export_bank_project()
         elif action == "export_bank_edit_name":
@@ -7136,7 +7190,9 @@ class Editor:
         x, y = panel.x + 26, panel.y + 21
         self.screen.blit(self.title.render("EFFECT BANK / EXPORT", True, (238, 241, 248)), (x, y))
         subtitle = self.small.render(
-            "V4 baked RGB memory planner · 150 KiB flash · embedded editable projects",
+            ("RLE mapped bank · canvas edits excluded until saved · 150 KiB effect budget"
+             if self._bank_is_compressed() else
+             "V4 baked RGB memory planner · 150 KiB flash · embedded editable projects"),
             True, (143, 153, 174),
         )
         self.screen.blit(subtitle, (x, y + 31))
@@ -7157,11 +7213,15 @@ class Editor:
             "Save bank" if self.export_bank_path else "Choose file…", not errors,
         )
         self._button(pygame.Rect(panel.right - 76, y, 50, 32), "export_bank_close", "×", False)
+        self._button(pygame.Rect(panel.right - 210, y + 38, 126, 28), "export_bank_convert", "Convert…", False)
 
         used = self._export_bank_used_bytes()
         free = max(0, EFFECT_BANK_CAPACITY - used)
         frame_ms = max(1, int(self.project.frame_ms or 50))
         free_seconds = (free // 204) * frame_ms / 1000.0
+        if self._bank_is_compressed():
+            stored_seconds = sum(len(e.frames) * e.frame_ms for e in self.export_bank_effects) / 1000.0
+            free_seconds = free * stored_seconds / used if used else 0.0
         capacity_y = panel.y + 83
         # Cheap replace-by-id total (mirrors _export_bank_used_bytes): the
         # project's own duration_ms is used directly instead of baking its
@@ -7178,6 +7238,9 @@ class Editor:
             f"{free / 1024:.1f} KiB free   ·   ≈{free_seconds:.1f}s at {1000 / frame_ms:.2f} FPS   ·   "
             f"{bank_seconds:.1f}s total bank playback"
         )
+        if self._bank_is_compressed():
+            summary = (f"RLE bank: {used / 1024:.1f} / {EFFECT_BANK_CAPACITY / 1024:.0f} KiB · "
+                       f"{free / 1024:.1f} KiB free · ~{free_seconds:.1f}s more at bank average")
         summary_color = (255, 104, 92) if used > EFFECT_BANK_CAPACITY else (104, 221, 165)
         self.screen.blit(self.font.render(summary, True, summary_color), (x, capacity_y))
         memory = pygame.Rect(x, capacity_y + 31, panel.width - 52, 42)
@@ -7188,9 +7251,11 @@ class Editor:
             memory, 2 if used > EFFECT_BANK_CAPACITY else 1, border_radius=6,
         )
         entries = [
-            *[(index, effect.name, effect.flash_bytes) for index, effect in enumerate(self.export_bank_effects)],
+            *[(index, effect.name, self._bank_effect_bytes(effect)) for index, effect in enumerate(self.export_bank_effects)],
             (-1, self.project.name, self.project.flash_bytes),
         ]
+        if self._bank_is_compressed():
+            entries = entries[:-1]
         old_clip = self.screen.get_clip()
         self.screen.set_clip(memory.inflate(-2, -2))
         cursor = memory.x + 2
@@ -7243,7 +7308,7 @@ class Editor:
             self.screen.blit(count_surface, (toolbar.right - count_surface.get_width(), toolbar.y + 8))
 
         list_entries = [
-            *[(index, effect.name, effect.flash_bytes) for index, effect in visible_pairs],
+            *[(index, effect.name, self._bank_effect_bytes(effect)) for index, effect in visible_pairs],
             (-1, self.project.name, self.project.flash_bytes),
         ]
 
@@ -7297,7 +7362,7 @@ class Editor:
 
         self._draw_export_bank_details(detail)
         status_color = (255, 110, 98) if errors else (102, 218, 163)
-        status = " · ".join(errors) if errors else self.export_bank_status
+        status = self.export_bank_status if self.export_bank_status.startswith("Converted ") else (" · ".join(errors) if errors else self.export_bank_status)
         self.screen.blit(
             self.small.render(self._fit_text(status, self.small, panel.width - 52), True, status_color),
             (x, panel.bottom - 37),
@@ -7313,7 +7378,7 @@ class Editor:
         loops = self.project.loops if current else effect.loops
         loop_frames = self.project.normalized_loop_frames if current else effect.normalized_loop_frames
         overlay = self.project.overlay if current else effect.overlay
-        byte_count = self.project.flash_bytes if current else effect.flash_bytes
+        byte_count = self.project.flash_bytes if current else self._bank_effect_bytes(effect)
         x, y = detail.x + 14, detail.y + 16
         badge = "CURRENT PROJECT" if current else "MAPPED HEADER EFFECT"
         color_index = self._export_bank_color_index(-1 if current else self.export_bank_selected)

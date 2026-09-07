@@ -8,6 +8,7 @@ import unicodedata
 from .engine import render_leds_with_mask
 from .effect_importer import ImportedEffect
 from .model import Project
+from .frame_codec import pack_frames
 from .project_bundle import embedded_project_lines
 
 FIRMWARE_LED_COUNT = 68
@@ -151,8 +152,9 @@ def export_effect_bank(
     effects: list[ImportedEffect],
     path: str | Path,
     max_bytes: int | None = EFFECT_BANK_CAPACITY,
+    *, compressed: bool = False,
 ) -> Path:
-    _validate_effect_bank(effects, max_bytes)
+    _validate_effect_bank(effects, None if compressed else max_bytes)
     symbols = _unique_symbols(effects)
     total_bytes = sum(effect.flash_bytes for effect in effects)
     capacity_note = (
@@ -245,7 +247,20 @@ def export_effect_bank(
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.tmp")
-    temporary.write_text("\n".join(lines), encoding="utf-8")
+    source = "\n".join(lines)
+    if compressed:
+        total = 0
+        for effect, symbol in zip(effects, symbols):
+            packed = pack_frames(effect.frames)
+            total += len(packed)
+            body = "\n".join("  " + ", ".join(str(v ^ FX_DATA_MASK) for v in packed[i:i + 32]) + "," for i in range(0, len(packed), 32))
+            source = re.sub(r"(const uint8_t " + re.escape(symbol) + r"\[\] FX_DATA_PROGMEM = \{).*?(\};)", lambda m: m[1] + "\n" + body + "\n" + m[2], source, flags=re.S)
+        if max_bytes is not None and total > max_bytes:
+            raise ValueError(f"Compressed bank uses {total} bytes, exceeding {max_bytes}")
+        source = source.replace("#pragma once", '#pragma once\n#define FX_FRAME_CODEC 1\n#if !defined(FX_CODEC_SUPPORTED) || FX_CODEC_SUPPORTED != 1\n#error "RLE bank requires compatible firmware"\n#endif')
+        source = source.replace("// Frame-major RGB: 68 LEDs * 3 channels = 204 bytes per stored frame.", f"// RLE v1: indexed independent frames, raw fallback; {total} stored bytes.")
+        source = source.replace(f"{total_bytes} bytes{capacity_note}", f"{total} stored bytes; {total_bytes} decoded bytes")
+    temporary.write_text(source, encoding="utf-8")
     temporary.replace(destination)
     return destination
 
