@@ -2044,24 +2044,33 @@ def test_stencil_glows_mix_overlapping_led_colors():
     assert pixel.g == 0
 
 
-def test_stencil_uses_light_blue_background_while_canvas_is_active():
+def test_canvas_is_marked_by_a_frame_and_keeps_the_field_black():
+    """A canvas allapot nem festheti at a palyat.
+
+    A glow-reteg BLEND_RGB_ADD-del kerul a kepernyore, ezert egy szines
+    hatter minden LED-re rááadodna, es nem az latszana, ami a valodi
+    szalagon lesz. A jelzes ezert a palyan KIVUL futo keret.
+    """
     editor = make_editor()
     editor.project.overlay = True
     editor._action("canvas_layer")
     canvas, _, _ = editor.layout()
-    sample = (canvas.x + 10, canvas.y + 10)
+    inside = (canvas.x + 10, canvas.y + 10)
     editor.screen.fill((0, 0, 0))
 
     editor._draw_leds(canvas, stencil_back=True)
-    active = editor.screen.get_at(sample)
+    assert editor.screen.get_at(inside)[:3] == (0, 0, 0), "a palya hattere fekete marad"
 
-    assert active.b > active.r
-    assert active.g > active.r
+    frame = canvas.inflate(6, 6)
+    edge = editor.screen.get_at((frame.centerx, frame.top))
+    assert edge.b > edge.r and edge.g > edge.r, "a keret vilagoskek"
+
     editor.current_ms = 50
     editor._action("canvas_state:0")
     editor.screen.fill((0, 0, 0))
     editor._draw_leds(canvas, stencil_back=True)
-    assert editor.screen.get_at(sample)[:3] == (0, 0, 0)
+    assert editor.screen.get_at(inside)[:3] == (0, 0, 0)
+    assert editor.screen.get_at((frame.centerx, frame.top))[:3] == (0, 0, 0),         "canvas nelkul nincs keret"
 
 
 def test_gradient_editor_adds_moves_and_recolors_stops():

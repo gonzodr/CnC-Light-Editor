@@ -266,7 +266,11 @@ _CRASH_LOG_SEPARATOR = "=" * 70 + "\n"
 ACCENT = (77, 148, 255)
 PANEL = (31, 34, 42)
 PANEL_DARK = (24, 26, 33)
-CANVAS_STENCIL_BACKGROUND = (40, 112, 142)
+# A canvas (atlatszo) allapot jelzese. NEM hatterkent: a glow-reteg
+# BLEND_RGB_ADD-del kerul a kepernyore, igy egy kitoltes az egesz
+# palyakepre rááadodna es kimosna a szineket - a LED-ek pont nem ugy
+# nezenenek ki, mint a valodi szalagon. Ezert keret + felirat.
+CANVAS_STENCIL_ACCENT = (90, 190, 235)
 
 TIMELINE_PROPERTY_LABELS = {
     "x": "Position X", "y": "Position Y",
@@ -5793,9 +5797,9 @@ class Editor:
                     self._glow_canvas_cache.clear()
                 glow_layer = pygame.Surface(visible.size).convert()
                 self._glow_canvas_cache[visible.size] = glow_layer
-            glow_layer.fill(
-                CANVAS_STENCIL_BACKGROUND if self._stencil_canvas_active() else (0, 0, 0)
-            )
+            # A hatter mindig fekete, hogy a LED-ek ugyanugy nezzenek ki,
+            # mint a fekete palyan. A canvas allapotot a keret jelzi.
+            glow_layer.fill((0, 0, 0))
             light_radius = max(20, min(46, canvas.width // 10))
             for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
                 color = (0, 0, 0) if led.name.strip().upper() == "NULL" else rendered_color
@@ -5809,6 +5813,8 @@ class Editor:
                 )
                 glow_layer.blit(light, local, special_flags=pygame.BLEND_RGB_ADD)
             self.screen.blit(glow_layer, visible.topleft, special_flags=pygame.BLEND_RGB_ADD)
+            if self._stencil_canvas_active():
+                self._draw_canvas_marker(canvas)
             return
         for led, (x, y), rendered_color in zip(self.led_map.leds, self.led_points, colors):
             color = (0, 0, 0) if led.name.strip().upper() == "NULL" else rendered_color
@@ -5823,6 +5829,22 @@ class Editor:
             if canvas.width > 620 or self.calibration:
                 label = str(led.firmware_index)
                 self.screen.blit(self.small.render(label, True, (245, 245, 245)), (pos[0] + radius, pos[1] - radius))
+
+    def _draw_canvas_marker(self, canvas: pygame.Rect) -> None:
+        """Vilagoskek keret + felirat a palya korul, canvas allapotban.
+
+        A keret a palyan KIVUL fut, hogy egyetlen LED-et se szinezzen at, es
+        a felirat is csak akkor kerul befele, ha kint mar nem ferne el.
+        """
+        frame = canvas.inflate(6, 6)
+        pygame.draw.rect(self.screen, CANVAS_STENCIL_ACCENT, frame, 2)
+        label = self.small.render("CANVAS ON", True, CANVAS_STENCIL_ACCENT)
+        x = frame.right - label.get_width()
+        y = frame.top - label.get_height() - 3
+        if y < self.screen.get_clip().top:
+            y = frame.top + 3
+            x = frame.right - label.get_width() - 4
+        self.screen.blit(label, (x, y))
 
     def _stencil_canvas_active(self) -> bool:
         effect = self._active_imported_effect()
