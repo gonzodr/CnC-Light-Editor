@@ -1,0 +1,537 @@
+{
+  "name": "Lovepack",
+  "duration_ms": 2500,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Love ingredients",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "line",
+          "name": "Three beers",
+          "x": 0.08,
+          "y": 0.72,
+          "width": 0.45,
+          "height": 0.05,
+          "rotation": -25,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            165,
+            35
+          ],
+          "opacity": 1.0,
+          "feather": 0.018,
+          "mask_expansion": 0.01,
+          "fill_mode": "stroke",
+          "stroke_width": 0.05,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 778053475,
+          "noise_seed": 1684997190,
+          "id": "26842f5fb4",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 0,
+                "value": 0.08,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.48,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 0,
+                "value": 0.72,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.5,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 730,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Three joints",
+          "x": 0.92,
+          "y": 0.72,
+          "width": 0.45,
+          "height": 0.04,
+          "rotation": 25,
+          "rotation_turns": 0.0,
+          "color": [
+            70,
+            240,
+            70
+          ],
+          "opacity": 1.0,
+          "feather": 0.018,
+          "mask_expansion": 0.01,
+          "fill_mode": "stroke",
+          "stroke_width": 0.04,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 2061630533,
+          "noise_seed": 1553204628,
+          "id": "71cf7175f2",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 100,
+                "value": 0.92,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.52,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 100,
+                "value": 0.72,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.5,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 100,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Love fusion",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            105,
+            190
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.055,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1373700580,
+          "noise_seed": 285933474,
+          "id": "4f866c0ba6",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 750,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1500,
+                "value": 2.15,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 750,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1500,
+                "value": 1.12,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 750,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 800,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1400,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Love white heart flash",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.05,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 697837092,
+          "noise_seed": 344733112,
+          "id": "2c160af035",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 950,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1300,
+                "value": 0.9,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 950,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1300,
+                "value": 0.48,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 950,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1000,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1200,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1600,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "6adbacf79d",
+      "keyframes": {}
+    },
+    {
+      "name": "Love glitter",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [
+        {
+          "name": "Love glitter",
+          "enabled": true,
+          "seed": 1313,
+          "life_ms": 220,
+          "born_speed": 40,
+          "particle_count": 32,
+          "color": [
+            255,
+            105,
+            190
+          ],
+          "opacity": 1.0,
+          "id": "dcd8a0c35d",
+          "keyframes": {
+            "enabled": [
+              {
+                "time_ms": 0,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2350,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 900,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 950,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2250,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2350,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "eba4a5a1ec",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 180,
+      "id": "bd676c3509",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 2450,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "Canvas \u2013 transparent outside animation",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": true,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "8cbc4e1a74",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 13,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 50,
+  "intro_frames": 0,
+  "overlay": true
+}

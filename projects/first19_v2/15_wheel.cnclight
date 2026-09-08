@@ -1,0 +1,328 @@
+{
+  "name": "Wheel",
+  "duration_ms": 2200,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Wheel motion",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "line",
+          "name": "Wheel pointer",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.72,
+          "height": 0.035,
+          "rotation": -90,
+          "rotation_turns": 0.0,
+          "color": [
+            185,
+            65,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.015,
+          "mask_expansion": 0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.035,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 994982633,
+          "noise_seed": 787446199,
+          "id": "9f9bcccaa4",
+          "keyframes": {
+            "rotation_turns": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": 2.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1400,
+                "value": 5.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1850,
+                "value": 6.1,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1900,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Wheel rim",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            185,
+            65,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.03,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 390300816,
+          "noise_seed": 1041140354,
+          "id": "699a616a90",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 500,
+                "value": 1.75,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 500,
+                "value": 0.94,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 400,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1850,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Selected award",
+          "x": 0.76,
+          "y": 0.44,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.045,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 948409311,
+          "noise_seed": 544780181,
+          "id": "da93eeb5a3",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 1700,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1950,
+                "value": 0.55,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 1700,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1950,
+                "value": 0.28,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1700,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1750,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1850,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2120,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "130b0113b8",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 160,
+      "id": "c0205f663a",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 2150,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    }
+  ],
+  "effect_id": 15,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 44,
+  "intro_frames": 0,
+  "overlay": false
+}

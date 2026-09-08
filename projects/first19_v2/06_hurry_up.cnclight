@@ -1,0 +1,741 @@
+{
+  "name": "Hurry UP",
+  "duration_ms": 3600,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Clock",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "line",
+          "name": "Accelerating clock hand",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.62,
+          "height": 0.03,
+          "rotation": -90,
+          "rotation_turns": 0.0,
+          "color": [
+            185,
+            65,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.012,
+          "mask_expansion": 0.008,
+          "fill_mode": "stroke",
+          "stroke_width": 0.032,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 2020480912,
+          "noise_seed": 460672804,
+          "id": "4e17c99ab3",
+          "keyframes": {
+            "rotation_turns": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              },
+              {
+                "time_ms": 1000,
+                "value": 1.0,
+                "easing": "ease_in",
+                "bezier": null
+              },
+              {
+                "time_ms": 1900,
+                "value": 2.5,
+                "easing": "ease_in",
+                "bezier": null
+              },
+              {
+                "time_ms": 2700,
+                "value": 5.0,
+                "easing": "ease_in",
+                "bezier": null
+              },
+              {
+                "time_ms": 3200,
+                "value": 8.5,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 3150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 3300,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Clock pulse 1",
+          "x": 0.5,
+          "y": 0.52,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            185,
+            65,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 292470998,
+          "noise_seed": 2133855559,
+          "id": "1ff4f9bbc4",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 1.3,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.72,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 550,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Clock pulse 2",
+          "x": 0.5,
+          "y": 0.52,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1372693638,
+          "noise_seed": 1850622106,
+          "id": "e2d7b5d8c4",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 900,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1400,
+                "value": 1.5,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 900,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1400,
+                "value": 0.82,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 950,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1300,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1575,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Clock pulse 3",
+          "x": 0.5,
+          "y": 0.52,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            45,
+            180
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 147585746,
+          "noise_seed": 1755254183,
+          "id": "580faa113e",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 1650,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 1.65,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 1650,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 0.9,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1650,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1700,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1950,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2200,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Clock pulse 4",
+          "x": 0.5,
+          "y": 0.52,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 815418032,
+          "noise_seed": 53113696,
+          "id": "f03d9507fa",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 2250,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2550,
+                "value": 1.8,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 2250,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2550,
+                "value": 0.98,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2250,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2300,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2450,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2680,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Clock pulse 5",
+          "x": 0.5,
+          "y": 0.52,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 116426752,
+          "noise_seed": 1452160773,
+          "id": "740b9819f4",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 2750,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 3000,
+                "value": 2.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 2750,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 3000,
+                "value": 1.1,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2750,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2800,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2900,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 3150,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "45f4ddfed2",
+      "keyframes": {}
+    },
+    {
+      "name": "Final alarm",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "rectangle",
+          "name": "Final triple alarm",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 2.2,
+          "height": 1.3,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 826175955,
+          "noise_seed": 413029549,
+          "id": "890f4e0cdf",
+          "keyframes": {
+            "visible": [
+              {
+                "time_ms": 2999,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3000,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3050,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3149,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3150,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3200,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3299,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3300,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 3400,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "ed84d41b87",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 100,
+      "id": "214c4bff69",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 3550,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "Canvas \u2013 transparent outside animation",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": true,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "69d9c90d98",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 6,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 72,
+  "intro_frames": 0,
+  "overlay": true
+}

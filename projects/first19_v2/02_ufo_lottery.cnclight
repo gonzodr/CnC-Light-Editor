@@ -1,0 +1,613 @@
+{
+  "name": "UFO Lottery",
+  "duration_ms": 2600,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Roulette selector",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Accelerating lottery light",
+          "x": 0.5,
+          "y": 0.82,
+          "width": 0.13,
+          "height": 0.055,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.02,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 72282386,
+          "noise_seed": 1176761795,
+          "id": "efc132ef29",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 0,
+                "value": 0.5,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 0.22,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 550,
+                "value": 0.18,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 750,
+                "value": 0.3,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.53,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1020,
+                "value": 0.76,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1120,
+                "value": 0.86,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1210,
+                "value": 0.7,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1290,
+                "value": 0.45,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1360,
+                "value": 0.28,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1420,
+                "value": 0.46,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1470,
+                "value": 0.7,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1520,
+                "value": 0.76,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 0,
+                "value": 0.82,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 0.72,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 550,
+                "value": 0.5,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 750,
+                "value": 0.3,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.17,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1020,
+                "value": 0.28,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1120,
+                "value": 0.48,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1210,
+                "value": 0.65,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1290,
+                "value": 0.68,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1360,
+                "value": 0.53,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1420,
+                "value": 0.36,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1470,
+                "value": 0.39,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1520,
+                "value": 0.44,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1650,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1800,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "color": [
+              {
+                "time_ms": 0,
+                "value": [
+                  185,
+                  65,
+                  255
+                ],
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": [
+                  45,
+                  235,
+                  255
+                ],
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1250,
+                "value": [
+                  255,
+                  220,
+                  45
+                ],
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1520,
+                "value": [
+                  255,
+                  255,
+                  255
+                ],
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "21986174da",
+      "keyframes": {}
+    },
+    {
+      "name": "UFO landing",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Green UFO lock",
+          "x": 0.76,
+          "y": 0.44,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            70,
+            240,
+            70
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 207030871,
+          "noise_seed": 1202804936,
+          "id": "c786bdab25",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 1450,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 1.45,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 1450,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2050,
+                "value": 0.76,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1450,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1500,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1950,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2300,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "White confirmation",
+          "x": 0.76,
+          "y": 0.44,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.025,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 2085572929,
+          "noise_seed": 1710218363,
+          "id": "d608fd2ff1",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 1750,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2200,
+                "value": 0.75,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 1750,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2200,
+                "value": 0.4,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1750,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1800,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2100,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 2400,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "f932f6305d",
+      "keyframes": {}
+    },
+    {
+      "name": "Lottery stars",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [
+        {
+          "name": "Lottery stars",
+          "enabled": true,
+          "seed": 202,
+          "life_ms": 180,
+          "born_speed": 24,
+          "particle_count": 18,
+          "color": [
+            180,
+            255,
+            40
+          ],
+          "opacity": 1.0,
+          "id": "d7ca402dc3",
+          "keyframes": {
+            "enabled": [
+              {
+                "time_ms": 0,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1500,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2500,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 1500,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1550,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2400,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 2500,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "7c059300b0",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 180,
+      "id": "be0dd4cf26",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 2550,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    }
+  ],
+  "effect_id": 2,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 52,
+  "intro_frames": 0,
+  "overlay": false
+}

@@ -1,0 +1,430 @@
+{
+  "name": "DAVE Ball Save Lit",
+  "duration_ms": 1200,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "DAVE shield convergence",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Left shield arc",
+          "x": 0.07,
+          "y": 0.69,
+          "width": 0.12,
+          "height": 0.1,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            80,
+            180,
+            255
+          ],
+          "opacity": 0.0,
+          "feather": 0.08,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 580709455,
+          "noise_seed": 2102281836,
+          "id": "0137152087",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 0,
+                "value": 0.07,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.455,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.455,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 0,
+                "value": 0.69,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.855,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.855,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.08,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.28,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.1,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.07,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.22,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 100,
+                "value": 0.95,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 720,
+                "value": 0.7124999999999999,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 980,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Right shield arc",
+          "x": 0.86,
+          "y": 0.69,
+          "width": 0.12,
+          "height": 0.1,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            188,
+            235,
+            255
+          ],
+          "opacity": 0.0,
+          "feather": 0.08,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 344834311,
+          "noise_seed": 736625515,
+          "id": "045b12139a",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 80,
+                "value": 0.86,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.455,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.455,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 80,
+                "value": 0.69,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.855,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.855,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "width": [
+              {
+                "time_ms": 80,
+                "value": 0.08,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.28,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.1,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 80,
+                "value": 0.07,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.22,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 80,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 180,
+                "value": 0.95,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 720,
+                "value": 0.7124999999999999,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 980,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Ball save shield",
+          "x": 0.455,
+          "y": 0.855,
+          "width": 0.05,
+          "height": 0.04,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            235,
+            252,
+            255
+          ],
+          "opacity": 0.0,
+          "feather": 0.11,
+          "mask_expansion": 0.0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.04,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1655751626,
+          "noise_seed": 1580029530,
+          "id": "ed8afc816b",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 540,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.5,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1140,
+                "value": 0.76,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 540,
+                "value": 0.04,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.28,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1140,
+                "value": 0.45,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 500,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 620,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1150,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "52d490db00",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 22,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 0,
+  "intro_frames": 0,
+  "overlay": true
+}

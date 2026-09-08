@@ -1,0 +1,702 @@
+{
+  "name": "Jackpot",
+  "duration_ms": 2000,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Jackpot blast",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Gold jackpot wave 1",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.055,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1077114661,
+          "noise_seed": 361722872,
+          "id": "0aa6b11c44",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 2.1,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 1.1,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 550,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "White jackpot core",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.07,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1668386703,
+          "noise_seed": 1411593854,
+          "id": "9350a36bf7",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 250,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": 1.2,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 250,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": 0.62,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 250,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 600,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1000,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Gold jackpot wave 2",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.05,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 849769975,
+          "noise_seed": 407574197,
+          "id": "fa2720fe84",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 650,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1250,
+                "value": 2.2,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 650,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1250,
+                "value": 1.16,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1550,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Red winner streak",
+          "x": 0.08,
+          "y": 0.82,
+          "width": 0.75,
+          "height": 0.04,
+          "rotation": -36,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            20,
+            12
+          ],
+          "opacity": 1.0,
+          "feather": 0.018,
+          "mask_expansion": 0.01,
+          "fill_mode": "stroke",
+          "stroke_width": 0.04,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1735756300,
+          "noise_seed": 497290299,
+          "id": "38058ff5ab",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 500,
+                "value": 0.08,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1350,
+                "value": 0.92,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 500,
+                "value": 0.82,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1350,
+                "value": 0.18,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 500,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 550,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1230,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1350,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Blue winner streak",
+          "x": 0.92,
+          "y": 0.82,
+          "width": 0.75,
+          "height": 0.04,
+          "rotation": 36,
+          "rotation_turns": 0.0,
+          "color": [
+            45,
+            145,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.018,
+          "mask_expansion": 0.01,
+          "fill_mode": "stroke",
+          "stroke_width": 0.04,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 2122925996,
+          "noise_seed": 213772984,
+          "id": "cccc332cd0",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 600,
+                "value": 0.92,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1450,
+                "value": 0.08,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 600,
+                "value": 0.82,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1450,
+                "value": 0.18,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 600,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1330,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 1450,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "12054a7e3d",
+      "keyframes": {}
+    },
+    {
+      "name": "Jackpot gold rain",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [
+        {
+          "name": "Jackpot gold rain",
+          "enabled": true,
+          "seed": 1919,
+          "life_ms": 190,
+          "born_speed": 52,
+          "particle_count": 38,
+          "color": [
+            255,
+            220,
+            45
+          ],
+          "opacity": 1.0,
+          "id": "a2fa7ec53d",
+          "keyframes": {
+            "enabled": [
+              {
+                "time_ms": 0,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 450,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1850,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 450,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 500,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1750,
+                "value": 1.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1850,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "c547f17d72",
+      "keyframes": {}
+    },
+    {
+      "name": "Jackpot flashes",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "rectangle",
+          "name": "Jackpot double flash",
+          "x": 0.5,
+          "y": 0.5,
+          "width": 2.2,
+          "height": 1.3,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1504974148,
+          "noise_seed": 35091427,
+          "id": "f88c3ededf",
+          "keyframes": {
+            "visible": [
+              {
+                "time_ms": 649,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 750,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1249,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1250,
+                "value": true,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 1350,
+                "value": false,
+                "easing": "linear",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "167ac607d5",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 120,
+      "id": "7698a9f1e1",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 1950,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    }
+  ],
+  "effect_id": 19,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 40,
+  "intro_frames": 0,
+  "overlay": false
+}

@@ -1,0 +1,540 @@
+{
+  "name": "Bonus X Level Up",
+  "duration_ms": 900,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Bonus multiplier staircase",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Bonus step 1",
+          "x": 0.338,
+          "y": 0.755,
+          "width": 0.055,
+          "height": 0.045,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            184,
+            38
+          ],
+          "opacity": 0.0,
+          "feather": 0.055,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 826898733,
+          "noise_seed": 610648982,
+          "id": "0b8c37fd05",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.025,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 180,
+                "value": 0.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 600,
+                "value": 0.11,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.02,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 180,
+                "value": 0.16,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 600,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 40,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 690,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Bonus step 2",
+          "x": 0.415,
+          "y": 0.755,
+          "width": 0.055,
+          "height": 0.045,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            202,
+            56
+          ],
+          "opacity": 0.0,
+          "feather": 0.055,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1701255076,
+          "noise_seed": 431508051,
+          "id": "19a601b14d",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 90,
+                "value": 0.025,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 270,
+                "value": 0.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 690,
+                "value": 0.11,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 90,
+                "value": 0.02,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 270,
+                "value": 0.16,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 690,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 90,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 130,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 390,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Bonus step 3",
+          "x": 0.494,
+          "y": 0.755,
+          "width": 0.055,
+          "height": 0.045,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            220,
+            74
+          ],
+          "opacity": 0.0,
+          "feather": 0.055,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 89168554,
+          "noise_seed": 1103069993,
+          "id": "5b1e1ee8ba",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 180,
+                "value": 0.025,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 360,
+                "value": 0.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 0.11,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 180,
+                "value": 0.02,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 360,
+                "value": 0.16,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 180,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 220,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 480,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Bonus step 4",
+          "x": 0.571,
+          "y": 0.755,
+          "width": 0.055,
+          "height": 0.045,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            238,
+            92
+          ],
+          "opacity": 0.0,
+          "feather": 0.055,
+          "mask_expansion": 0.0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1133702906,
+          "noise_seed": 1953301139,
+          "id": "3dbd9c242f",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 270,
+                "value": 0.025,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 450,
+                "value": 0.2,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 870,
+                "value": 0.11,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 270,
+                "value": 0.02,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 450,
+                "value": 0.16,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 870,
+                "value": 0.08,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 270,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 310,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 570,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Bonus gold underline",
+          "x": 0.455,
+          "y": 0.77,
+          "width": 0.06,
+          "height": 0.025,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            245,
+            150
+          ],
+          "opacity": 0.0,
+          "feather": 0.03,
+          "mask_expansion": 0.0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.026,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 54039561,
+          "noise_seed": 1556274593,
+          "id": "7bd92eef88",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 180,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 580,
+                "value": 0.55,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.82,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 140,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 200,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 580,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "1165eb368f",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 26,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 0,
+  "intro_frames": 0,
+  "overlay": true
+}

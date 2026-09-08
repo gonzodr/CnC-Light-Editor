@@ -1,0 +1,354 @@
+{
+  "name": "Gift Cheech",
+  "duration_ms": 1000,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Gift Cheech burst",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Gift Cheech ribbon ring",
+          "x": 0.658,
+          "y": 0.4,
+          "width": 0.04,
+          "height": 0.03,
+          "rotation": 0.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            42,
+            34
+          ],
+          "opacity": 0.0,
+          "feather": 0.07,
+          "mask_expansion": 0.0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.035,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 930580183,
+          "noise_seed": 697533124,
+          "id": "63bc86c99a",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 420,
+                "value": 0.85,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 1.3,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.02,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 420,
+                "value": 0.58,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 850,
+                "value": 0.95,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 80,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 430,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Gift Cheech ribbon",
+          "x": 0.658,
+          "y": 0.4,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 28.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            42,
+            34
+          ],
+          "opacity": 0.0,
+          "feather": 0.03,
+          "mask_expansion": 0.0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.03,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 664140830,
+          "noise_seed": 808614859,
+          "id": "3a97256c60",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 100,
+                "value": 0.04,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 1.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 1.35,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 80,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "line",
+          "name": "Gift Cheech ribbon",
+          "x": 0.658,
+          "y": 0.4,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": -28.0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            126,
+            28
+          ],
+          "opacity": 0.0,
+          "feather": 0.03,
+          "mask_expansion": 0.0,
+          "fill_mode": "stroke",
+          "stroke_width": 0.03,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1860433298,
+          "noise_seed": 1263450862,
+          "id": "c32e48619b",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 100,
+                "value": 0.04,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 1.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 900,
+                "value": 1.35,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 80,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.75,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 920,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [
+        {
+          "name": "Gift Cheech confetti",
+          "enabled": true,
+          "seed": 2424,
+          "life_ms": 320,
+          "born_speed": 38,
+          "particle_count": 22,
+          "color": [
+            255,
+            92,
+            54
+          ],
+          "opacity": 0.0,
+          "id": "fbcf16ee32",
+          "keyframes": {
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 120,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 650,
+                "value": 0.85,
+                "easing": "linear",
+                "bezier": null
+              },
+              {
+                "time_ms": 950,
+                "value": 0.0,
+                "easing": "ease_in",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "9115220968",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 24,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 0,
+  "intro_frames": 0,
+  "overlay": true
+}

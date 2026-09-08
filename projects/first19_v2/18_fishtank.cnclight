@@ -1,0 +1,484 @@
+{
+  "name": "Fishtank",
+  "duration_ms": 950,
+  "fps": 20,
+  "width": 3043,
+  "height": 6305,
+  "layers": [
+    {
+      "name": "Rising tank bubbles",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "name": "Bubble 1",
+          "x": 0.74,
+          "y": 0.62,
+          "width": 0.1,
+          "height": 0.045,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            45,
+            235,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.02,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1886522712,
+          "noise_seed": 1204852099,
+          "id": "539380423b",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 0,
+                "value": 0.74,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 0.71,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 560,
+                "value": 0.76,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 0,
+                "value": 0.62,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 300,
+                "value": 0.48,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 560,
+                "value": 0.32,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 480,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 620,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Bubble 2",
+          "x": 0.8,
+          "y": 0.62,
+          "width": 0.1,
+          "height": 0.045,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            45,
+            145,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.02,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1604923348,
+          "noise_seed": 1637144840,
+          "id": "ff98c2658a",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 100,
+                "value": 0.8,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 400,
+                "value": 0.77,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 660,
+                "value": 0.8200000000000001,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 100,
+                "value": 0.62,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 400,
+                "value": 0.48,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 660,
+                "value": 0.32,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 100,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 150,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 580,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 720,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Bubble 3",
+          "x": 0.85,
+          "y": 0.62,
+          "width": 0.1,
+          "height": 0.045,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            255,
+            255,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.02,
+          "mask_expansion": 0,
+          "fill_mode": "fill",
+          "stroke_width": 0.012,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 665693005,
+          "noise_seed": 1083342413,
+          "id": "842bd65799",
+          "keyframes": {
+            "x": [
+              {
+                "time_ms": 220,
+                "value": 0.85,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.82,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 0.87,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "y": [
+              {
+                "time_ms": 220,
+                "value": 0.62,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 520,
+                "value": 0.48,
+                "easing": "ease_in_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 780,
+                "value": 0.32,
+                "easing": "ease_in_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 220,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 270,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 700,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 840,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ellipse",
+          "name": "Tank ripple",
+          "x": 0.79,
+          "y": 0.57,
+          "width": 0.05,
+          "height": 0.03,
+          "rotation": 0,
+          "rotation_turns": 0.0,
+          "color": [
+            45,
+            235,
+            255
+          ],
+          "opacity": 1.0,
+          "feather": 0.025,
+          "mask_expansion": 0.015,
+          "fill_mode": "stroke",
+          "stroke_width": 0.03,
+          "gradient_type": "solid",
+          "gradient_radial_mode": "radius",
+          "gradient_angle": 0.0,
+          "gradient_stops": [],
+          "visible": true,
+          "wiggle_enabled": false,
+          "wiggle_amplitude": 0.02,
+          "wiggle_speed": 2.0,
+          "wiggle_seed": 1787517489,
+          "noise_seed": 65272626,
+          "id": "216e40c17c",
+          "keyframes": {
+            "width": [
+              {
+                "time_ms": 0,
+                "value": 0.05,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 450,
+                "value": 1.1,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "height": [
+              {
+                "time_ms": 0,
+                "value": 0.03,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 450,
+                "value": 0.55,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ],
+            "opacity": [
+              {
+                "time_ms": 0,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 50,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 350,
+                "value": 1.0,
+                "easing": "ease_out",
+                "bezier": null
+              },
+              {
+                "time_ms": 820,
+                "value": 0.0,
+                "easing": "ease_out",
+                "bezier": null
+              }
+            ]
+          }
+        }
+      ],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "c34c687ce5",
+      "keyframes": {}
+    },
+    {
+      "name": "Falloff",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": false,
+      "canvas_enabled": true,
+      "is_falloff": true,
+      "falloff_enabled": true,
+      "falloff_ms": 140,
+      "id": "a5596528c2",
+      "keyframes": {
+        "falloff_enabled": [
+          {
+            "time_ms": 0,
+            "value": true,
+            "easing": "linear",
+            "bezier": null
+          },
+          {
+            "time_ms": 900,
+            "value": false,
+            "easing": "linear",
+            "bezier": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "Canvas \u2013 transparent outside animation",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "shapes": [],
+      "effects": [],
+      "strobe_effects": [],
+      "color_cycle_effects": [],
+      "pulse_effects": [],
+      "comet_effects": [],
+      "is_canvas": true,
+      "canvas_enabled": true,
+      "is_falloff": false,
+      "falloff_enabled": true,
+      "falloff_ms": 600,
+      "id": "e74d386450",
+      "keyframes": {}
+    }
+  ],
+  "effect_id": 18,
+  "frame_ms": 50,
+  "loops": 1,
+  "loop_frames": 19,
+  "intro_frames": 0,
+  "overlay": true
+}
