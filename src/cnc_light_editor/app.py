@@ -20,6 +20,7 @@ from uuid import uuid4
 import pygame
 
 from .autosave import AutosaveManager, RecoveryRecord
+from .bridge import complete as complete_bridge_request, read_requests as read_bridge_requests
 from .engine import noise_color, point_inside, render_leds, sample_gradient
 from .effect_bank import (
     SORT_MODES,
@@ -536,6 +537,7 @@ class Editor:
                 else:
                     self.handle_event(event)
             update_changed = self._poll_update_events()
+            bridge_changed = self._poll_bridge_requests()
             if self.playing:
                 if self.loop_playback:
                     start_ms, end_ms = self._loop_section_bounds()
@@ -551,6 +553,7 @@ class Editor:
                 redraw_requested
                 or bool(events)
                 or update_changed
+                or bridge_changed
                 or autosaved
                 or self.playing
                 or smoke_test
@@ -564,6 +567,54 @@ class Editor:
                     pygame.image.save(self.screen, str(screenshot))
                 self.exit_requested = True
         return self.restart_requested
+
+    def _poll_bridge_requests(self) -> bool:
+        changed = False
+        for path, request in read_bridge_requests():
+            changed = True
+            request_id = str(request.get("id") or path.stem)
+            command = request.get("command")
+            try:
+                if command == "load":
+                    target = Path(str(request["path"])).resolve()
+                    self.load_project_file(target)
+                    self.current_ms = 0
+                    self.playing = bool(request.get("play", False))
+                    message = f"Loaded through bridge: {target.name}"
+                    if self.playing:
+                        message += " — playing"
+                    self.status = message
+                elif command == "bank":
+                    target = Path(str(request["path"])).resolve()
+                    self.map_effect_bank_file(target)
+                    self._open_export_bank()
+                    message = f"Mapped through bridge: {target.name} — Effect Bank open"
+                    self.export_bank_status = message
+                    self.status = message
+                elif command == "play":
+                    self.current_ms = 0
+                    self.playing = True
+                    self.loop_playback = False
+                    message = "Bridge playback started"
+                    self.status = message
+                elif command == "stop":
+                    self.playing = False
+                    message = "Bridge playback stopped"
+                    self.status = message
+                elif command == "seek":
+                    self.playing = False
+                    self.current_ms = max(
+                        0, min(float(request["time_ms"]), max(0, self.project.duration_ms - 1))
+                    )
+                    message = f"Bridge playhead: {int(self.current_ms)} ms"
+                    self.status = message
+                else:
+                    raise ValueError(request.get("error") or f"unknown command: {command}")
+            except (OSError, ValueError, TypeError, KeyError) as error:
+                complete_bridge_request(path, request_id, ok=False, message=f"Bridge error: {error}")
+            else:
+                complete_bridge_request(path, request_id, ok=True, message=message)
+        return changed
 
     def start_update_check(self, *, auto_install: bool = True) -> bool:
         if self.update_thread and self.update_thread.is_alive():
@@ -3402,6 +3453,10 @@ class Editor:
     def load_effect_data_file(self, path: str | Path) -> None:
         path = Path(path)
         self.imported_effects = load_effect_data(path)
+        self.export_bank_compressed = bool(
+            re.search(r"#define\s+FX_FRAME_CODEC\s+1\b", path.read_text(encoding="utf-8"))
+        )
+        self._packed_size_cache = {}
         self.effect_data_path = path
         self.active_import_index = 0
         self.timeline_mode = "dope"
@@ -4100,8 +4155,19 @@ class Editor:
             # any previous backup on purpose (see restore_export_bank_backup).
             shutil.copy2(target, self._export_bank_backup_path(target))
             backed_up = True
-        destination = export_effect_bank(combined, path, max_bytes=EFFECT_BANK_CAPACITY)
-        self.export_bank_compressed = False
+        # Saving back to an RLE-mapped header must preserve its storage format.
+        # Previously this path silently fell back to the raw exporter, so a
+        # perfectly valid compressed bank was rejected by the old raw 150 KiB
+        # limit as soon as one effect was added or changed.
+        compressed = self._bank_is_compressed()
+        destination = export_effect_bank(
+            combined,
+            path,
+            max_bytes=EFFECT_BANK_CAPACITY,
+            compressed=compressed,
+        )
+        self.export_bank_compressed = compressed
+        self._packed_size_cache = {}
         self.export_bank_path = destination.resolve()
         # The file on disk is now the source of truth.  Keep every editor view
         # in sync immediately so saving never requires a manual re-map just to
@@ -4183,6 +4249,7 @@ class Editor:
             shutil.copy2(backup_path, target)
             if temporary.is_file():
                 temporary.replace(backup_path)
+            source = target.read_text(encoding="utf-8")
             effects = load_effect_data(target)
         except (OSError, TypeError, ValueError, KeyError) as error:
             if temporary.is_file():
@@ -4190,6 +4257,10 @@ class Editor:
             self.export_bank_status = f"Backup restore failed: {error}"
             return False
         self.export_bank_effects = deepcopy(effects)
+        self.export_bank_compressed = bool(
+            re.search(r"#define\s+FX_FRAME_CODEC\s+1\b", source)
+        )
+        self._packed_size_cache = {}
         self.imported_effects = deepcopy(effects)
         self.effect_data_path = Path(target).resolve()
         self.export_bank_project_origin_id = None

@@ -23,8 +23,9 @@ from cnc_light_editor.app import (
     get_git_commit,
     log_crash,
 )
-from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect, parse_effect_data
+from cnc_light_editor.effect_importer import EFFECT_LEDS, ImportedEffect, load_effect_data, parse_effect_data
 from cnc_light_editor.exporter import (
+    EFFECT_BANK_CAPACITY,
     TRANSPARENT_SENTINEL,
     export_effect_bank,
     project_to_imported_effect,
@@ -2669,6 +2670,34 @@ def test_mapped_bank_saves_in_place_and_refreshes_without_remapping(tmp_path):
     assert [(effect.effect_id, effect.name) for effect in parse_effect_data(
         target.read_text(encoding="utf-8")
     )] == [(7, "Existing"), (8, "New effect")]
+
+
+def test_mapped_compressed_bank_stays_compressed_when_saved(tmp_path):
+    # Raw data is deliberately above the 150 KiB bank limit, while one-color
+    # RLE frames are tiny. This reproduces the former save failure exactly.
+    solid_frames = [[(12, 80, 5)] * 68 for _ in range(760)]
+    target = export_effect_bank(
+        [ImportedEffect("Large compressed bank", solid_frames, effect_id=7)],
+        tmp_path / "effect_data.h",
+        compressed=True,
+    )
+    editor = make_editor()
+    editor.project = Project(
+        "Michoakan Multiball Start", duration_ms=100, frame_ms=50, effect_id=20,
+        layers=[Layer("Black", shapes=[Shape("rectangle", "End", color=(0, 0, 0))])],
+    )
+    editor.map_effect_bank_file(target)
+
+    assert editor._bank_is_compressed()
+    assert sum(effect.flash_bytes for effect in editor.export_bank_effects) > EFFECT_BANK_CAPACITY
+    assert editor.save_mapped_effect_bank() is True
+
+    source = target.read_text(encoding="utf-8")
+    assert "#define FX_FRAME_CODEC 1" in source
+    assert editor._bank_is_compressed()
+    assert [(effect.effect_id, effect.name) for effect in load_effect_data(target)] == [
+        (7, "Large compressed bank"), (20, "Michoakan Multiball Start"),
+    ]
 
 
 def test_mapped_bank_requires_confirmation_before_accidental_id_replacement(tmp_path):
